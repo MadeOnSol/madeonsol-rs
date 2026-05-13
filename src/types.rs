@@ -268,6 +268,12 @@ pub struct KolFeedParams {
     pub min_kol_winrate: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strategy: Option<KolStrategy>,
+    /// v0.7 — Lower bound on `market_cap_usd_at_trade`. Trades with unknown MC drop out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_mc_usd: Option<f64>,
+    /// v0.7 — Upper bound on `market_cap_usd_at_trade`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_mc_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -309,6 +315,12 @@ pub struct KolCoordinationParams {
     pub window_minutes: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_score: Option<u32>,
+    /// v0.7 — Lower bound on entry MC (MC at first KOL buy).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_mc_usd: Option<f64>,
+    /// v0.7 — Upper bound on entry MC.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_mc_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -417,14 +429,6 @@ pub struct KolLeaderboardEntry {
     pub percentile_pnl_30d: Option<f64>,
     #[serde(default)]
     pub percentile_winrate_30d: Option<f64>,
-    /// v0.6 (2026-05-06) — average market cap (USD) at the moment of each buy in the period.
-    /// Null when no buys had a tracked MC stamp.
-    #[serde(default)]
-    pub avg_entry_mc_usd: Option<f64>,
-    /// v0.6 — buys whose `market_cap_usd_at_trade` was non-null and counted toward
-    /// `avg_entry_mc_usd`. Use to gauge confidence.
-    #[serde(default)]
-    pub entry_mc_samples: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -961,6 +965,11 @@ pub struct CoordinationAlertRule {
     pub score_jump_break: u32,
     pub delivery_mode: CoordinationDeliveryMode,
     pub webhook_url: Option<String>,
+    /// v0.7 — entry-MC band on the rule (None = open-ended).
+    #[serde(default)]
+    pub min_mc_usd: Option<f64>,
+    #[serde(default)]
+    pub max_mc_usd: Option<f64>,
     pub is_active: bool,
     pub created_at: String,
     #[serde(default)]
@@ -987,6 +996,11 @@ pub struct CoordinationAlertCreateParams {
     pub delivery_mode: Option<CoordinationDeliveryMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub webhook_url: Option<String>,
+    /// v0.7 — entry-MC band the rule will require for triggers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_mc_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_mc_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1011,6 +1025,11 @@ pub struct CoordinationAlertUpdateParams {
     pub webhook_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_active: Option<bool>,
+    /// v0.7 — pass `Some(0.0)` etc. to update the band; `None` leaves unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_mc_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_mc_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1110,6 +1129,12 @@ pub struct FirstTouchesParams {
     /// Comma-separated includes — currently `followers_4h`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include: Option<String>,
+    /// v0.7 — Lower bound on `market_cap_usd_at_first_buy`. Touches with unknown MC drop out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_mc_usd: Option<f64>,
+    /// v0.7 — Upper bound on `market_cap_usd_at_first_buy`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_mc_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1187,6 +1212,11 @@ pub struct FirstTouchSubscription {
     pub filters: FirstTouchSubscriptionFilters,
     pub delivery_mode: CoordinationDeliveryMode,
     pub webhook_url: Option<String>,
+    /// v0.7 — first-touch MC band on the subscription (None = open-ended).
+    #[serde(default)]
+    pub min_mc_usd: Option<f64>,
+    #[serde(default)]
+    pub max_mc_usd: Option<f64>,
     pub is_active: bool,
     pub created_at: String,
     #[serde(default)]
@@ -1203,6 +1233,11 @@ pub struct FirstTouchSubscriptionCreateParams {
     pub delivery_mode: Option<CoordinationDeliveryMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub webhook_url: Option<String>,
+    /// v0.7 — first-touch MC band on the subscription.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_mc_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_mc_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1215,6 +1250,11 @@ pub struct FirstTouchSubscriptionUpdateParams {
     pub delivery_mode: Option<CoordinationDeliveryMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub webhook_url: Option<String>,
+    /// v0.7 — pass `Some(0.0)` etc. to update the band; `None` leaves unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_mc_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_mc_usd: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_active: Option<bool>,
 }
@@ -1702,12 +1742,6 @@ pub struct AlphaWalletEntry {
     pub active_hours: Option<f64>,
     #[serde(default)]
     pub bot_confidence: Option<String>,
-    /// v0.6 (2026-05-06) — avg market cap (USD) at the moment of each buy in the period.
-    /// Null + 0 samples for non-KOL wallets that don't appear in our trade-level dataset.
-    #[serde(default)]
-    pub avg_entry_mc_usd: Option<f64>,
-    #[serde(default)]
-    pub entry_mc_samples: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2147,4 +2181,166 @@ pub struct WebhookListResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub struct WebhookDeleteResponse {
     pub success: bool,
+}
+
+// ─── /me — v0.8 (server-side v1.7, 2026-05-12) ───────────────────────────────
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum ApiTier {
+    Basic,
+    Trader,
+    Pro,
+    Ultra,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MeQuotaWindow {
+    pub limit: u64,
+    pub used: u64,
+    pub remaining: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MeDailyQuota {
+    pub limit: u64,
+    pub used: u64,
+    pub remaining: u64,
+    pub resets_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MeBurstQuota {
+    pub limit: u64,
+    pub used: u64,
+    pub remaining: u64,
+    pub window_seconds: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MeQuota {
+    pub daily: MeDailyQuota,
+    pub burst: MeBurstQuota,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MeSubscription {
+    pub status: String,
+    pub billing_cycle: String,
+    pub current_period_end: Option<String>,
+    pub started_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MeFeatureSlot {
+    pub limit: u32,
+    #[serde(default)]
+    pub used: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MeFeatureUsage {
+    pub webhooks: MeFeatureSlot,
+    pub ws_connections: MeFeatureSlot,
+    pub dex_connections: MeFeatureSlot,
+    pub copytrade_wallets: MeFeatureSlot,
+    pub copytrade_rules: MeFeatureSlot,
+    pub coordination_rules: MeFeatureSlot,
+    pub first_touch_subscriptions: MeFeatureSlot,
+    pub wallet_tracker_watchlist: MeWatchlistSlot,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MeWatchlistSlot {
+    #[serde(default)]
+    pub used: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MeResponse {
+    pub subscriber: String,
+    pub tier: String,
+    pub tier_label: String,
+    pub subscription: Option<MeSubscription>,
+    pub quota: MeQuota,
+    pub features: MeFeatureUsage,
+    #[serde(default, rename = "_rid")]
+    pub _rid: Option<String>,
+}
+
+// ─── /tokens (directory list) — v0.8 ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TokensListParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_mc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_mc: Option<f64>,
+    /// Default 2000. Set Some(0.0) to disable the dust floor.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_liq: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_h: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_dex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authority_revoked: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exclude_token2022: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_lp_burnt_pct: Option<f64>,
+    /// Post-filter: organic-volume floor in last 1h.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_volume_1h_usd: Option<f64>,
+    /// Post-filter: MEV/bot share ceiling as % of total.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_mev_share_pct: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mc_change_1h_min_pct: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mc_change_1h_max_pct: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenSummary {
+    pub mint: String,
+    pub symbol: Option<String>,
+    pub name: Option<String>,
+    pub price_usd: Option<f64>,
+    pub market_cap_usd: Option<f64>,
+    pub fdv_usd: Option<f64>,
+    pub liquidity_usd: Option<f64>,
+    pub primary_dex: Option<String>,
+    pub authorities_revoked: bool,
+    pub lp_burnt_pct: Option<f64>,
+    pub is_token_2022: bool,
+    pub last_trade_time: Option<String>,
+    pub mc_change_5m_pct: Option<f64>,
+    pub mc_change_1h_pct: Option<f64>,
+    pub organic_volume_1h_usd: Option<f64>,
+    pub mev_share_pct: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokensListPagination {
+    pub limit: u32,
+    pub offset: u32,
+    pub returned: u32,
+    pub has_more: bool,
+    pub post_filtered: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokensListResponse {
+    pub tokens: Vec<TokenSummary>,
+    pub pagination: TokensListPagination,
+    pub filters: serde_json::Value,
+    #[serde(default, rename = "_rid")]
+    pub _rid: Option<String>,
 }

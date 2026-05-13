@@ -57,7 +57,7 @@ use std::sync::Arc;
 
 use crate::api::{
     alpha::Alpha, coordination_alerts::CoordinationAlerts, deployer::Deployer,
-    first_touch_subscriptions::FirstTouchSubscriptions, kol::Kol, stream::Stream, token::Token,
+    first_touch_subscriptions::FirstTouchSubscriptions, kol::Kol, me::Me, stream::Stream, token::Token,
     tools::Tools, wallet_tracker::WalletTracker, webhooks::Webhooks,
 };
 use crate::client::HttpCore;
@@ -94,6 +94,8 @@ pub struct MadeOnSol {
     pub alpha: Alpha,
     /// Token intelligence — comprehensive per-mint snapshot + batch lookups.
     pub token: Token,
+    /// Account self-inspection — tier, quota, feature usage (v0.8).
+    pub me: Me,
     /// Wallet tracker: watchlist CRUD, trades, summary.
     pub wallet_tracker: WalletTracker,
     /// Coordination alert rules CRUD (v1.1) — PRO/ULTRA.
@@ -138,6 +140,7 @@ impl MadeOnSol {
             deployer: Deployer { core: Arc::clone(&core) },
             alpha: Alpha { core: Arc::clone(&core) },
             token: Token { core: Arc::clone(&core) },
+            me: Me { core: Arc::clone(&core) },
             wallet_tracker: WalletTracker { core: Arc::clone(&core) },
             coordination_alerts: CoordinationAlerts { core: Arc::clone(&core) },
             first_touch_subscriptions: FirstTouchSubscriptions { core: Arc::clone(&core) },

@@ -5,6 +5,7 @@ pub mod first_touch_subscriptions;
 pub mod kol;
 pub mod stream;
 pub mod token;
+pub mod me;
 pub mod tools;
 pub mod wallet_tracker;
 pub mod webhooks;

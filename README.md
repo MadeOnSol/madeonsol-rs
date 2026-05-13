@@ -13,12 +13,14 @@ async, `tokio`-based, `rustls`-only.
 >
 > **Free tier: 200 requests/day at <https://madeonsol.com/developer> — no credit card required.**
 
-> **New in 0.6.0** *(2026-05-06)* — Market cap fields flow through every signal endpoint.
-> `KolLeaderboardEntry` and `AlphaWalletEntry` gain `avg_entry_mc_usd` + `entry_mc_samples`
-> (micro-cap vs mid-cap trader profile). `CoordinatedToken` gains
-> `market_cap_usd_at_first_buy` + current `market_cap_usd` + `last_price_usd`.
-> `FirstTouchEvent` gains `market_cap_usd_at_first_buy` + `price_usd_at_first_buy` +
-> current MC. All additive — no breaking changes.
+> **New in 0.8.0** *(2026-05-12)* — **Token directory + account inspection.**
+> `client.token.list(&TokensListParams { min_liq: Some(10_000.0), min_volume_1h_usd: Some(5_000.0), max_mev_share_pct: Some(60.0), mc_change_1h_min_pct: Some(20.0), sort: Some("mc_desc".into()), ..Default::default() })` filters every active mint by MC band, liquidity floor, primary DEX,
+> authority/safety flags, computed 1h volume, MEV-share ceiling, and MC-change deltas. Default `min_liq=2000` skips phantom-MC dust;
+> pass `Some(0.0)` to opt out. `client.me.get()` — read your tier, daily/burst
+> quota state, and per-feature usage in one call (no header parsing). Velocity / MEV-share fields added
+> to every `TokenResponseBody`: `velocity["5m"|"15m"|"1h"|"2h"|"4h"]` with
+> `mc_change_pct`, `volume_usd`, `mev_volume_pct`. `/token/{mint}` 400s now ship
+> structured `code`, `reason`, `received_length`, `example`, and `docs`. Deprecated `avg_entry_mc_usd` / `entry_mc_samples` fully removed.
 
 ## Get an API key
 

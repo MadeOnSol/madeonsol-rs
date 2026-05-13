@@ -40,4 +40,15 @@ impl Token {
             .post_json("/tokens/batch/buyer-quality", &MintBatchRequest { mints })
             .await
     }
+
+    /// v0.8 — Filtered, sortable token directory (PRO+). Default `min_liq=2000`
+    /// trims the long tail of phantom-MC tokens (low-liq pools producing absurd
+    /// VWAP × supply products); set `Some(0.0)` to opt out. Computed filters
+    /// (`min_volume_1h_usd`, `max_mev_share_pct`, `mc_change_1h_*`) over-fetch
+    /// 3× from the DB and filter in app — pagination page size may be smaller
+    /// than `limit` when those are set. Check `pagination.post_filtered` to
+    /// detect.
+    pub async fn list(&self, params: &TokensListParams) -> Result<TokensListResponse> {
+        self.core.get("/tokens", params).await
+    }
 }
