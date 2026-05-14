@@ -5,10 +5,10 @@ use thiserror::Error;
 pub enum MadeOnSolError {
     /// API key was missing or malformed at construction time.
     ///
-    /// Get a free key (200 req/day, no card) at <https://madeonsol.com/developer>.
+    /// Get a free key (200 req/day, no card) at <https://madeonsol.com/pricing>.
     #[error(
         "MadeOnSol: apiKey is required and must start with `msk_`. \
-         Get a free key at https://madeonsol.com/developer"
+         Get a free key at https://madeonsol.com/pricing"
     )]
     MissingApiKey,
 

@@ -5,7 +5,7 @@
 //!
 //! ## Get an API key
 //!
-//! Free tier: **200 requests/day, no credit card** at <https://madeonsol.com/developer>.
+//! Free tier: **200 requests/day, no credit card** at <https://madeonsol.com/pricing>.
 //! Paid tiers (PRO $49/mo, ULTRA $149/mo) unlock higher rate limits, sub-hour windows,
 //! WebSocket streaming, webhooks, and the all-DEX firehose.
 //!
@@ -114,7 +114,7 @@ impl MadeOnSol {
     /// Construct a new client.
     ///
     /// `api_key` must start with `msk_`. Get a free key (200 req/day, no card)
-    /// at <https://madeonsol.com/developer>.
+    /// at <https://madeonsol.com/pricing>.
     ///
     /// # Errors
     ///
@@ -125,10 +125,10 @@ impl MadeOnSol {
         let api_key = api_key.into();
         if !api_key.starts_with("msk_") {
             // Print to stderr too — a bare Err can be swallowed and the user
-            // never sees the link to /developer.
+            // never sees the link to /pricing.
             eprintln!(
                 "\n[madeonsol] Missing or invalid API key.\n\
-                 → Get a free key (200 req/day, no card) at https://madeonsol.com/developer\n\
+                 → Get a free key (200 req/day, no card) at https://madeonsol.com/pricing\n\
                  → Then: madeonsol::MadeOnSol::new(std::env::var(\"MADEONSOL_API_KEY\")?)?\n"
             );
             return Err(MadeOnSolError::MissingApiKey);

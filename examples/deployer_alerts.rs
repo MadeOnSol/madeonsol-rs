@@ -8,7 +8,7 @@
 //! NOTE: the `tier` filter is PRO/ULTRA only. On the free tier this still works,
 //! it just returns alerts across all tiers.
 //!
-//! Get a free API key (200 req/day, no card) at https://madeonsol.com/developer.
+//! Get a free API key (200 req/day, no card) at https://madeonsol.com/pricing.
 
 use madeonsol::{
     types::{DeployerAlertsParams, DeployerTier},
@@ -18,7 +18,7 @@ use madeonsol::{
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api_key = std::env::var("MADEONSOL_API_KEY")
-        .expect("set MADEONSOL_API_KEY — get a free one at https://madeonsol.com/developer");
+        .expect("set MADEONSOL_API_KEY — get a free one at https://madeonsol.com/pricing");
 
     let client = MadeOnSol::new(api_key)?;
 

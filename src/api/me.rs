@@ -15,7 +15,7 @@ impl Me {
     ///
     /// Reads from the same in-memory counters that drive rate-limit enforcement, so
     /// `quota.daily.remaining` is authoritative — no need to parse rate-limit headers.
-    /// Available to every authenticated tier (BASIC/TRADER/PRO/ULTRA).
+    /// Available to every authenticated tier (BASIC/PRO/ULTRA).
     pub async fn get(&self) -> Result<MeResponse> {
         self.core.get("/me", &()).await
     }

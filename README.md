@@ -11,7 +11,7 @@ async, `tokio`-based, `rustls`-only.
 > score 6,700+ Pump.fun deployers by reputation, detect multi-KOL coordination
 > signals, and stream every DEX trade across 9+ programs.
 >
-> **Free tier: 200 requests/day at <https://madeonsol.com/developer> — no credit card required.**
+> **Free tier: 200 requests/day at <https://madeonsol.com/pricing> — no credit card required.**
 
 > **New in 0.8.0** *(2026-05-12)* — **Token directory + account inspection.**
 > `client.token.list(&TokensListParams { min_liq: Some(10_000.0), min_volume_1h_usd: Some(5_000.0), max_mev_share_pct: Some(60.0), mc_change_1h_min_pct: Some(20.0), sort: Some("mc_desc".into()), ..Default::default() })` filters every active mint by MC band, liquidity floor, primary DEX,
@@ -37,7 +37,7 @@ webhooks, and the all-DEX firehose:
 | **PRO** | $49/mo | 10,000 | ✅ | ✅ | 3 | — |
 | **ULTRA** | $149/mo | 100,000 | ✅ | ✅ | 10 | ✅ |
 
-Annual: PRO $490/yr, ULTRA $1990/yr (2 months free).
+Annual: PRO $490/yr, ULTRA $1,490/yr (2 months free).
 
 ## Install
 
@@ -56,7 +56,7 @@ use madeonsol::{MadeOnSol, types::{KolFeedParams, KolAction}};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Free key — get one at https://madeonsol.com/developer
+    // Free key — get one at https://madeonsol.com/pricing
     let client = MadeOnSol::new(std::env::var("MADEONSOL_API_KEY")?)?;
 
     let feed = client.kol.feed(&KolFeedParams {
@@ -135,7 +135,7 @@ match client.kol.token("invalid-mint").await {
 
 `Error::MissingApiKey` is returned by `MadeOnSol::new` if the key is empty or
 doesn't start with `msk_` — the error message and a stderr hint both link to
-<https://madeonsol.com/developer>.
+<https://madeonsol.com/pricing>.
 
 ## First-touch signal *(new in 0.4)*
 
@@ -222,7 +222,7 @@ See <https://madeonsol.com/api-docs> for the full subscribe/unsubscribe protocol
 - API docs: <https://madeonsol.com/api-docs> (interactive try-it-now)
 - OpenAPI 3.1 spec: <https://madeonsol.com/api/v1/openapi.json>
 - Postman collection: <https://madeonsol.com/api/v1/postman.json>
-- Pricing & free key: <https://madeonsol.com/developer>
+- Pricing & free key: <https://madeonsol.com/pricing>
 - Issues: <https://github.com/LamboPoewert/madeonsol-rs/issues>
 
 ## License
