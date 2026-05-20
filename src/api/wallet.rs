@@ -1,0 +1,67 @@
+use std::sync::Arc;
+
+use crate::client::HttpCore;
+use crate::error::Result;
+use crate::types::*;
+
+/// Universal per-wallet endpoints — works on any Solana wallet, not just
+/// curated KOLs. FIFO cost-basis PnL over the last 90 days. PRO+ on every
+/// method.
+///
+/// Cached in `wallet_analyses` with dynamic TTL (5min / 1h / 24h based on
+/// last activity). Cache hits don't count against your daily quota.
+#[derive(Debug, Clone)]
+pub struct Wallet {
+    pub(crate) core: Arc<HttpCore>,
+}
+
+impl Wallet {
+    /// Aggregate stats for any wallet over the last 90 days plus cross-product
+    /// flags (KOL / alpha / deployer). Sub-100ms even on heavy wallets.
+    /// Returns HTTP 404 if the wallet has no trades AND no flag-table presence.
+    pub async fn stats(&self, address: &str) -> Result<WalletStatsResponse> {
+        self.core
+            .get(&format!("/wallet/{}", address), &())
+            .await
+    }
+
+    /// Full FIFO cost-basis PnL: realized + unrealized SOL, profit factor,
+    /// max drawdown, avg + median hold minutes, daily UTC PnL curve, closed
+    /// positions sorted by pnl desc, open positions hydrated with live prices
+    /// from the market-cap tracker.
+    ///
+    /// **Cost-basis honesty**: observable only inside the 90-day data window.
+    /// Overflow sells (no matching buy in window) are silently discarded
+    /// rather than fabricated. `notes.cost_basis_observable_from` makes the
+    /// cutoff visible per call.
+    pub async fn pnl(&self, address: &str) -> Result<WalletPnlResponse> {
+        self.core
+            .get(&format!("/wallet/{}/pnl", address), &())
+            .await
+    }
+
+    /// Open positions only — lighter slice of `pnl()` for UIs that don't need
+    /// the full summary or curve. Shares the `wallet_analyses` cache:
+    /// calling this right after `pnl()` is an immediate cache hit.
+    pub async fn positions(&self, address: &str) -> Result<WalletPositionsResponse> {
+        self.core
+            .get(&format!("/wallet/{}/positions", address), &())
+            .await
+    }
+
+    /// Cursor-paginated raw trades. Default window is the last 90 days;
+    /// override via `since` / `until` (Unix epoch seconds). Default limit
+    /// 100, max 500.
+    ///
+    /// Cursor is base64 of `block_time:id` from the previous response's
+    /// `next_cursor`. Stable across DESC pagination.
+    pub async fn trades(
+        &self,
+        address: &str,
+        params: &WalletTradesParams,
+    ) -> Result<WalletTradesResponse> {
+        self.core
+            .get(&format!("/wallet/{}/trades", address), params)
+            .await
+    }
+}

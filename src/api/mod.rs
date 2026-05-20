@@ -7,5 +7,6 @@ pub mod stream;
 pub mod token;
 pub mod me;
 pub mod tools;
+pub mod wallet;
 pub mod wallet_tracker;
 pub mod webhooks;

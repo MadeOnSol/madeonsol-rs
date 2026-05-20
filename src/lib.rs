@@ -37,7 +37,8 @@
 //! - [`MadeOnSol::kol`] — KOL feed, leaderboard, coordination, PnL, trending tokens, alerts
 //! - [`MadeOnSol::deployer`] — Pump.fun deployer leaderboard, alerts, trajectory
 //! - [`MadeOnSol::alpha`] — alpha-wallet leaderboard, profiles, cap tables, buyer quality
-//! - [`MadeOnSol::wallet_tracker`] — track arbitrary Solana wallets
+//! - [`MadeOnSol::wallet_tracker`] — track arbitrary Solana wallets (watchlist)
+//! - [`MadeOnSol::wallet`] — universal wallet stats, FIFO PnL, open positions, paginated trades (PRO+)
 //! - [`MadeOnSol::coordination_alerts`] — push alerts on coordinated buying (PRO/ULTRA)
 //! - [`MadeOnSol::tools`] — Solana tool directory search
 //! - [`MadeOnSol::stream`] — WebSocket streaming token issuance
@@ -58,7 +59,7 @@ use std::sync::Arc;
 use crate::api::{
     alpha::Alpha, coordination_alerts::CoordinationAlerts, deployer::Deployer,
     first_touch_subscriptions::FirstTouchSubscriptions, kol::Kol, me::Me, stream::Stream, token::Token,
-    tools::Tools, wallet_tracker::WalletTracker, webhooks::Webhooks,
+    tools::Tools, wallet::Wallet, wallet_tracker::WalletTracker, webhooks::Webhooks,
 };
 use crate::client::HttpCore;
 use crate::error::{MadeOnSolError, Result};
@@ -98,6 +99,8 @@ pub struct MadeOnSol {
     pub me: Me,
     /// Wallet tracker: watchlist CRUD, trades, summary.
     pub wallet_tracker: WalletTracker,
+    /// Universal wallet endpoints — stats, FIFO PnL, open positions, paginated trades for any Solana wallet. PRO+.
+    pub wallet: Wallet,
     /// Coordination alert rules CRUD (v1.1) — PRO/ULTRA.
     pub coordination_alerts: CoordinationAlerts,
     /// First-touch webhook subscriptions CRUD — ULTRA only. Use `kol.first_touches()` for read-only queries.
@@ -142,6 +145,7 @@ impl MadeOnSol {
             token: Token { core: Arc::clone(&core) },
             me: Me { core: Arc::clone(&core) },
             wallet_tracker: WalletTracker { core: Arc::clone(&core) },
+            wallet: Wallet { core: Arc::clone(&core) },
             coordination_alerts: CoordinationAlerts { core: Arc::clone(&core) },
             first_touch_subscriptions: FirstTouchSubscriptions { core: Arc::clone(&core) },
             tools: Tools { core: Arc::clone(&core) },

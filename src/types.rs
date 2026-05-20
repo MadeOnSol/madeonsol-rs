@@ -2081,6 +2081,219 @@ pub struct WalletTrackerDeleteResponse {
     pub success: bool,
 }
 
+// ─── Universal wallet (PRO+) ────────────────────────────────────────────────
+// New 2026-05-20. Works on any Solana wallet — not just curated KOLs. Backed
+// by FIFO cost-basis math over the last 90 days of token_trades. Cached in
+// `wallet_analyses` with dynamic TTL (5min/1h/24h). Cache hits don't count
+// against your daily quota.
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletStats {
+    pub first_seen: String,
+    pub last_seen: String,
+    pub total_trades: u64,
+    pub buys: u64,
+    pub sells: u64,
+    pub bought_sol: f64,
+    pub sold_sol: f64,
+    pub unique_tokens: u64,
+    /// Lookback window in days — currently 90.
+    pub window_days: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletFlags {
+    pub is_kol: bool,
+    pub kol_name: Option<String>,
+    /// True if the wallet appears in `mv_alpha_wallets`.
+    pub is_alpha_tracked: bool,
+    /// 0–1; higher = more bot-like. Sourced from the alpha classifier.
+    pub bot_confidence: Option<f64>,
+    pub alpha_win_rate: Option<f64>,
+    pub alpha_net_pnl_sol: Option<f64>,
+    pub alpha_tokens_traded: Option<u64>,
+    pub is_deployer: bool,
+    pub deployer_tokens_deployed: Option<u64>,
+    pub deployer_bonding_rate: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletStatsResponse {
+    pub address: String,
+    /// None when the wallet has no trades in the 90-day window but does
+    /// appear in one of the flag tables.
+    pub stats: Option<WalletStats>,
+    pub flags: WalletFlags,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletBestWorstTrade {
+    pub token_mint: String,
+    pub realized_sol: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletPnlSummary {
+    pub realized_sol: f64,
+    pub unrealized_sol: f64,
+    pub total_pnl_sol: f64,
+    pub total_bought_sol: f64,
+    pub total_sold_sol: f64,
+    /// Closed-position win count (not per-trade).
+    pub wins: u64,
+    pub losses: u64,
+    pub win_rate: Option<f64>,
+    /// Gross wins / gross losses. None when no losses (undefined math).
+    pub profit_factor: Option<f64>,
+    pub avg_hold_minutes: Option<u64>,
+    pub median_hold_minutes: Option<u64>,
+    /// Running peak-to-trough drawdown on the realized SOL curve.
+    pub max_drawdown_sol: f64,
+    pub open_positions_count: u64,
+    pub closed_positions_count: u64,
+    pub total_tokens_traded: u64,
+    pub best_realized: Option<WalletBestWorstTrade>,
+    pub worst_realized: Option<WalletBestWorstTrade>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletPnlCurvePoint {
+    /// YYYY-MM-DD (UTC).
+    pub date: String,
+    pub day_pnl: f64,
+    pub cumulative_pnl: f64,
+    pub trades: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletClosedPosition {
+    pub token_mint: String,
+    pub buy_count: u64,
+    pub sell_count: u64,
+    pub bought_sol: f64,
+    pub sold_sol: f64,
+    pub pnl_sol: f64,
+    /// `realized_sol / total_bought_sol × 100`.
+    pub roi_pct: Option<f64>,
+    /// First buy → last sell, in minutes.
+    pub hold_minutes: Option<u64>,
+    pub result: String,
+    pub first_trade: Option<String>,
+    pub last_trade: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletOpenPosition {
+    pub token_mint: String,
+    pub token_amount: f64,
+    pub cost_basis_sol: f64,
+    pub avg_entry_price_sol: f64,
+    /// Live from mc-tracker. None if the mint has no current price.
+    pub current_price_sol: Option<f64>,
+    pub current_value_sol: Option<f64>,
+    pub unrealized_sol: Option<f64>,
+    pub unrealized_pct: Option<f64>,
+    pub first_buy_at: Option<String>,
+    pub buys_in_position: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletPnlNotes {
+    /// Cost basis is observable only from this timestamp onwards.
+    pub cost_basis_observable_from: String,
+    /// Present when the 50k-trade hard cap was hit.
+    #[serde(default)]
+    pub truncated_trades: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletPnlResponse {
+    pub address: String,
+    pub window_days: u32,
+    pub summary: WalletPnlSummary,
+    /// Sparse daily UTC buckets — only days with at least one realized event.
+    pub pnl_curve: Vec<WalletPnlCurvePoint>,
+    /// Sorted by `pnl_sol` DESC — best winners first.
+    pub closed_positions: Vec<WalletClosedPosition>,
+    pub open_positions: Vec<WalletOpenPosition>,
+    pub notes: WalletPnlNotes,
+    #[serde(default)]
+    pub cache_hit: Option<bool>,
+    /// Only present on cache hits.
+    #[serde(default)]
+    pub computed_at: Option<String>,
+    /// Only present on cache misses.
+    #[serde(default)]
+    pub ttl_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletPositionsResponse {
+    pub address: String,
+    pub positions: Vec<WalletOpenPosition>,
+    #[serde(default)]
+    pub cache_hit: Option<bool>,
+    #[serde(default)]
+    pub computed_at: Option<String>,
+    #[serde(default)]
+    pub ttl_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WalletTradeAction {
+    Buy,
+    Sell,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct WalletTradesParams {
+    /// 1–500; default 100.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// From `next_cursor` of a previous response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<WalletTradeAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_mint: Option<String>,
+    /// Unix epoch seconds; default now-90d.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<i64>,
+    /// Unix epoch seconds; default now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub until: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletTrade {
+    pub tx_signature: String,
+    pub token_mint: String,
+    pub action: String,
+    pub sol_amount: f64,
+    pub token_amount: f64,
+    pub block_time: i64,
+    pub traded_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletTradesFilters {
+    pub action: Option<String>,
+    pub token_mint: Option<String>,
+    pub since: i64,
+    pub until: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletTradesResponse {
+    pub address: String,
+    pub trades: Vec<WalletTrade>,
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
+    pub filters: WalletTradesFilters,
+}
+
 // ─── Tools ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default, Serialize)]
