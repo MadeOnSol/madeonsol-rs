@@ -98,6 +98,7 @@ The `MadeOnSol` client exposes namespaced sub-clients:
 | `client.deployer` | Pump.fun deployer leaderboard, alerts, trajectory, bonded tokens |
 | `client.alpha` | Alpha-wallet leaderboard, profiles, cap tables, buyer quality |
 | `client.wallet_tracker` | Track arbitrary Solana wallets — watchlist CRUD, swap/transfer history |
+| `client.wallet` *(new 0.9)* | Universal wallet endpoints — stats + cross-product flags, FIFO PnL, open positions, paginated trades (PRO+) |
 | `client.coordination_alerts` | Push alerts on coordinated buying (PRO/ULTRA) |
 | `client.first_touch_subscriptions` | Push alerts on first-KOL-touch events (ULTRA) |
 | `client.tools` | Solana tool directory search |
@@ -192,6 +193,48 @@ let res = client
 ```
 
 > **Don't poll — push.** Median lead time before the second KOL is 12 seconds. WebSocket channel: `kol:first_touches` (PRO+).
+
+## Universal wallet endpoints *(new in 0.9)*
+
+Per-wallet profile data for **any** Solana wallet — not just curated KOLs. FIFO cost-basis PnL over the last 90 days, cached server-side with dynamic TTL. Cache hits don't count against your daily quota. PRO+.
+
+```rust
+# async fn run(client: madeonsol::MadeOnSol) -> Result<(), Box<dyn std::error::Error>> {
+use madeonsol::types::WalletTradesParams;
+
+// 1. Profile any wallet — works on KOLs, alpha traders, deployers, randoms.
+let stats = client.wallet.stats("ASVzakePP6GNg9r95d4LPZHJDMXun6L6E4um4pu5ybJk").await?;
+if let Some(s) = stats.stats {
+    println!("{}: {} trades, {} unique tokens", stats.address, s.total_trades, s.unique_tokens);
+}
+println!("KOL: {} · alpha: {} · deployer: {}",
+    stats.flags.is_kol, stats.flags.is_alpha_tracked, stats.flags.is_deployer);
+
+// 2. Full FIFO PnL — realized + unrealized SOL, profit factor, drawdown,
+//    daily curve, closed/open positions.
+let pnl = client.wallet.pnl(&stats.address).await?;
+println!("Realized: {:+.2} SOL · Unrealized: {:+.2} SOL", pnl.summary.realized_sol, pnl.summary.unrealized_sol);
+if let Some(pf) = pnl.summary.profit_factor {
+    println!("Win rate: {:.0}% · Profit factor: {:.2}", pnl.summary.win_rate.unwrap_or(0.0) * 100.0, pf);
+}
+for c in pnl.closed_positions.iter().take(5) {
+    println!("  {}…  {:+.2} SOL ({:?}% ROI, {} min hold)",
+        &c.token_mint[..8], c.pnl_sol, c.roi_pct, c.hold_minutes.unwrap_or(0));
+}
+
+// 3. Paginated raw trades — keep paging with next_cursor.
+let mut params = WalletTradesParams { limit: Some(200), ..Default::default() };
+loop {
+    let page = client.wallet.trades(&stats.address, &params).await?;
+    for t in &page.trades { /* … */ }
+    if !page.has_more { break; }
+    params.cursor = page.next_cursor;
+}
+# Ok(())
+# }
+```
+
+**Cost-basis honesty.** Observable only inside the 90-day window. Overflow sells (no matching buy in window) are silently discarded rather than fabricated. `notes.cost_basis_observable_from` makes the cutoff visible.
 
 ## WebSocket streams (PRO/ULTRA)
 
