@@ -2117,6 +2117,64 @@ pub struct WalletFlags {
     pub deployer_bonding_rate: Option<f64>,
 }
 
+// v1.8.1 enrichments — additive, all Option<...> so old SDK builds keep
+// deserializing responses that omit them.
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletTopToken {
+    pub token_mint: String,
+    pub token_symbol: Option<String>,
+    pub buys: u64,
+    pub sells: u64,
+    pub sol_in: f64,
+    pub sol_out: f64,
+    pub realized_pnl_sol: f64,
+    pub current_mc_usd: Option<f64>,
+    pub peak_mc_usd: Option<f64>,
+    pub last_traded_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletTradingStyle {
+    pub total_trades: u64,
+    pub avg_trade_size_sol: f64,
+    /// 0–1: fraction of trades placed with `early_buyer_rank ≤ 10`.
+    pub sniper_rate: f64,
+    pub early_entries: u64,
+    /// 0–1: fraction of tokens with both buys and sells.
+    pub round_trip_rate: f64,
+    pub tokens_with_round_trips: u64,
+    pub median_hold_minutes: Option<f64>,
+    /// "buy" | "sell" | "balanced".
+    pub dominant_action: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletDeployerTierEntry {
+    /// "elite" | "good" | "rising" | "moderate" | "cold" | "unranked".
+    pub tier: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletDeployerBreakdown {
+    pub total_tokens: u64,
+    pub tracked_deployers: u64,
+    pub by_tier: Vec<WalletDeployerTierEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletRecentTrade {
+    pub token_mint: String,
+    pub token_symbol: Option<String>,
+    /// "buy" | "sell".
+    pub action: String,
+    pub sol_amount: f64,
+    pub block_time: i64,
+    pub traded_at: String,
+    pub tx_signature: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct WalletStatsResponse {
     pub address: String,
@@ -2124,6 +2182,18 @@ pub struct WalletStatsResponse {
     /// appear in one of the flag tables.
     pub stats: Option<WalletStats>,
     pub flags: WalletFlags,
+    /// Top traded tokens with realized PnL (v1.8.1+).
+    #[serde(default)]
+    pub top_tokens: Vec<WalletTopToken>,
+    /// Trading-style signals (v1.8.1+).
+    #[serde(default)]
+    pub trading_style: Option<WalletTradingStyle>,
+    /// Pump.fun deployer-tier distribution (v1.8.1+).
+    #[serde(default)]
+    pub deployer_breakdown: Option<WalletDeployerBreakdown>,
+    /// Last 10 raw trades with symbols joined (v1.8.1+).
+    #[serde(default)]
+    pub recent_trades: Vec<WalletRecentTrade>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
