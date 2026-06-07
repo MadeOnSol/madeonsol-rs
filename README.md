@@ -13,9 +13,12 @@ async, `tokio`-based, `rustls`-only.
 
 > Real-time Solana trading intelligence: track 1,000+ KOL wallets with <3s latency,
 > score 6,700+ Pump.fun deployers by reputation, detect multi-KOL coordination
-> signals, and stream every DEX trade across 9+ programs.
+> signals, push every pump.fun graduation the second it bonds, and stream every
+> DEX trade across 9+ programs.
 >
 > **Free tier: 200 requests/day at <https://madeonsol.com/pricing> — no credit card required.**
+
+> **New in 0.12.0** *(2026-06-07)* — **Graduation events + dump-cluster detection.** `GraduationEvent` — typed payload for the `token:graduations` WebSocket channel: every pump.fun bond in real time (tracked deployer or not) with deployer tier, time-to-bond, and MC at bond. `AlphaBuyerQualityBreakdown` adds `dump_cluster_count` (out-of-sample: 3+ such wallets in the first-20 → 94% dump vs 61% base) and `recycled_early_buyer_count`. DEX firehose: replay buffer deepened to ~5 min; mint-scoped subs get in-band `dex:graduations` frames.
 
 > **New in 0.10.0** *(2026-05-25)* — **Price alerts, scout leaderboard, KOL consensus, peak history, coordination history, wallet derived stats, trajectory snapshots.**
 > `client.price_alerts` — full CRUD for MC-drop / recovery alert rules (PRO/ULTRA). `client.kol.scout_leaderboard()` — ranked scouts by swarm attraction rate. `client.token.kol_consensus(mint)` — per-token KOL buyer/seller breakdown. `client.token.peak_history(mint)` — ATH, decline from peak, MC snapshots post-bond. `client.kol.coordination_history()` — past coordination fires. `client.deployer.trajectory(wallet, params)` now accepts `include: Some("daily_snapshots")` for 90d snapshots. `WalletStatsResponse.derived` — win rate, ROI, best/worst trade, biggest miss, AI verdict.

@@ -1988,6 +1988,34 @@ pub struct AlphaBuyerQualityBreakdown {
     pub bundle_buyer_count: u32,
     pub avg_historical_win_rate: Option<f64>,
     pub bot_dominated: bool,
+    /// First-20 buyers on the rolling dump-cluster list (wallets whose 5+
+    /// recent first-20 appearances are exclusively on tokens that peaked
+    /// <15 min after deploy; trailing 42d, refreshed daily). Out-of-sample:
+    /// 3+ such wallets predicted a sub-15-min peak 94% of the time vs 61%
+    /// base. Informational — does not move the score.
+    #[serde(default)]
+    pub dump_cluster_count: u32,
+    /// First-20 buyers with 5+ recent first-20 appearances of any kind.
+    /// Alone it predicts nothing; a heavily recycled cohort with
+    /// `dump_cluster_count` 0 historically leans runner.
+    #[serde(default)]
+    pub recycled_early_buyer_count: u32,
+}
+
+/// Payload of a `token:graduation` stream event — every pump.fun graduation
+/// (bonding curve complete → PumpSwap migration), tracked deployer or not.
+/// Delivered on the `token:graduations` WebSocket channel (PRO+).
+#[derive(Debug, Clone, Deserialize)]
+pub struct GraduationEvent {
+    pub token_mint: String,
+    pub token_name: Option<String>,
+    pub token_symbol: Option<String>,
+    pub time_to_bond_minutes: Option<f64>,
+    pub deployer_wallet: Option<String>,
+    /// `"unranked"` when the deployer is unknown to deployer-hunter.
+    pub deployer_tier: String,
+    pub market_cap_usd: Option<f64>,
+    pub bonded_at: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
