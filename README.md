@@ -18,6 +18,8 @@ async, `tokio`-based, `rustls`-only.
 >
 > **Free tier: 200 requests/day at <https://madeonsol.com/pricing> — no credit card required.**
 
+> **New in 0.16.0** — **Signal Scorecard.** New `client.signals` namespace. `client.signals.catalog()` returns the discovery index — every available signal with its `methodology` and a `performance_endpoint` (`SignalsCatalog`, `SignalCatalogEntry`). `client.signals.performance(name, &params)` returns a named signal's out-of-sample, machine-readable reliability — per-bucket `hit_rate` vs `base_rate`, `lift`, and `sample_n`, plus the test window and `methodology` (`SignalPerformance`, `SignalBucket`). Pass `SignalPerformanceParams { history: Some(true) }` to append the per-day drift series (`SignalHistoryEntry`). Valid signal names: `dump_cluster_count`, `runner_rate`, `recycled_early_buyer_count`, `coordination_count`. Open to any authenticated tier. New types: `SignalPerformanceParams`, `SignalPerformance`, `SignalBucket`, `SignalHistoryEntry`, `SignalsCatalog`, `SignalCatalogEntry`.
+
 > **New in 0.15.0** — **OHLC candles.** `client.token.candles(mint, &params)` returns 1-minute OHLC candles aggregated from the trade firehose (PRO/ULTRA): per-bar `open`/`high`/`low`/`close`, `volume_usd`, `trades`, and `market_cap_usd`. ULTRA unlocks buy/sell volume split (`buy_volume_usd`, `sell_volume_usd`, `net_volume_usd`), open/close liquidity, MC high/low, buy/sell counts, and MEV volume per candle. `CandlesParams` selects `tf`, `limit`, and an optional `from`/`to` window. New types: `CandlesParams`, `Candle`, `CandlesResponse`.
 
 > **New in 0.14.0** — **Token risk score.** `client.token.risk(mint)` returns a transparent 0–100 rug-risk / safety score (PRO/ULTRA, higher = riskier): an overall `risk_score` + `RiskBand` (`safe`/`caution`/`danger`), a per-factor `Vec<RiskFactor>` breakdown (each with `status`, `points`, and a human-readable `detail`), and the raw `RiskInputs` every factor was derived from (mint/freeze authority revocation, liquidity, transfer fee, launch cohort, deployer reputation, blacklist, …). New types: `TokenRisk`, `RiskFactor`, `RiskInputs`, `RiskBand`, `RiskFactorStatus`.
@@ -52,7 +54,7 @@ Annual: PRO $490/yr, ULTRA $1,490/yr (2 months free).
 
 ```toml
 [dependencies]
-madeonsol = "0.14"
+madeonsol = "0.16"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -108,6 +110,7 @@ The `MadeOnSol` client exposes namespaced sub-clients:
 | `client.coordination_alerts` | Push alerts on coordinated buying (PRO/ULTRA) |
 | `client.first_touch_subscriptions` | Push alerts on first-KOL-touch events (ULTRA) |
 | `client.price_alerts` *(new 0.10)* | MC-drop / recovery price alert rules CRUD + event history (PRO/ULTRA) |
+| `client.signals` *(new 0.16)* | **Signal Scorecard** — out-of-sample, machine-readable signal reliability (`performance`) + discovery catalog |
 | `client.sniper` *(new 0.11)* | **Deshred** pre-confirm pump.fun deploy feed (~500ms head start) + custom deployer watchlist (PRO/ULTRA) |
 | `client.tools` | Solana tool directory search |
 | `client.stream` | Issue 24h WebSocket streaming tokens |
@@ -339,6 +342,35 @@ let candles = client.token.candles(
 ).await?;
 for c in &candles.candles {
     println!("{} O:{} H:{} L:{} C:{} vol:${}", c.t, c.open, c.high, c.low, c.close, c.volume_usd);
+}
+# Ok(())
+# }
+```
+
+## New in 0.16: Signal Scorecard
+
+Out-of-sample, machine-readable reliability for each enrichment signal, so bots
+can weight them programmatically instead of asking. Open to any authenticated tier.
+
+```rust
+# async fn run(client: madeonsol::MadeOnSol) -> Result<(), Box<dyn std::error::Error>> {
+use madeonsol::types::SignalPerformanceParams;
+
+// Discover the available signals + how to fetch each one's efficacy
+let catalog = client.signals.catalog().await?;
+for s in &catalog.signals {
+    println!("{} → {}", s.name, s.performance_endpoint);
+}
+
+// Live, out-of-sample reliability for a named signal
+let perf = client.signals.performance(
+    "coordination_count",
+    &SignalPerformanceParams { history: Some(false) },
+).await?;
+println!("methodology: {:?}", perf.methodology);
+for b in &perf.buckets {
+    println!("{}: hit {:?} vs base {:?} (lift {:?}, n={})",
+        b.bucket, b.hit_rate, b.base_rate, b.lift, b.sample_n);
 }
 # Ok(())
 # }

@@ -41,6 +41,7 @@
 //! - [`MadeOnSol::wallet`] — universal wallet stats, FIFO PnL, open positions, paginated trades (PRO+)
 //! - [`MadeOnSol::coordination_alerts`] — push alerts on coordinated buying (PRO/ULTRA)
 //! - [`MadeOnSol::price_alerts`] — price-drop / recovery alert rules CRUD (PRO/ULTRA)
+//! - [`MadeOnSol::signals`] — Signal Scorecard: out-of-sample, machine-readable signal reliability
 //! - [`MadeOnSol::tools`] — Solana tool directory search
 //! - [`MadeOnSol::stream`] — WebSocket streaming token issuance
 //! - [`MadeOnSol::webhooks`] — webhook CRUD (PRO/ULTRA)
@@ -60,8 +61,8 @@ use std::sync::Arc;
 use crate::api::{
     alpha::Alpha, coordination_alerts::CoordinationAlerts, deployer::Deployer,
     first_touch_subscriptions::FirstTouchSubscriptions, kol::Kol, me::Me,
-    price_alerts::PriceAlerts, sniper::Sniper, stream::Stream, token::Token, tools::Tools,
-    wallet::Wallet, wallet_tracker::WalletTracker, webhooks::Webhooks,
+    price_alerts::PriceAlerts, signals::Signals, sniper::Sniper, stream::Stream, token::Token,
+    tools::Tools, wallet::Wallet, wallet_tracker::WalletTracker, webhooks::Webhooks,
 };
 use crate::client::HttpCore;
 use crate::error::{MadeOnSolError, Result};
@@ -109,6 +110,8 @@ pub struct MadeOnSol {
     pub first_touch_subscriptions: FirstTouchSubscriptions,
     /// Price-drop / recovery alert rules CRUD (v1.9) — PRO/ULTRA.
     pub price_alerts: PriceAlerts,
+    /// Signal Scorecard (v0.16) — out-of-sample, machine-readable signal reliability + catalog.
+    pub signals: Signals,
     /// Deshred pre-confirm pump.fun sniper feed + custom watchlist — PRO/ULTRA.
     pub sniper: Sniper,
     /// Solana tool directory search.
@@ -155,6 +158,7 @@ impl MadeOnSol {
             coordination_alerts: CoordinationAlerts { core: Arc::clone(&core) },
             first_touch_subscriptions: FirstTouchSubscriptions { core: Arc::clone(&core) },
             price_alerts: PriceAlerts { core: Arc::clone(&core) },
+            signals: Signals { core: Arc::clone(&core) },
             sniper: Sniper { core: Arc::clone(&core) },
             tools: Tools { core: Arc::clone(&core) },
             stream: Stream { core: Arc::clone(&core) },

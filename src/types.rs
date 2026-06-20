@@ -2349,6 +2349,122 @@ pub struct CandlesResponse {
     pub candles: Vec<Candle>,
 }
 
+// ─── Signal Scorecard (/signals) ────────────────────────────────────────────
+
+/// Query params for [`Signals::performance`](crate::api::signals::Signals::performance).
+/// Unset fields are omitted from the query string.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct SignalPerformanceParams {
+    /// When `Some(true)`, append the per-day snapshot series (`history`) for
+    /// drift inspection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<bool>,
+}
+
+/// A single per-bucket reliability row within a signal's scorecard.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SignalBucket {
+    /// Bucket label (e.g. a value or threshold band for the signal).
+    pub bucket: String,
+    /// Out-of-sample hit rate for this bucket (0–1).
+    #[serde(default)]
+    pub hit_rate: Option<f64>,
+    /// Base rate the bucket is compared against (0–1).
+    #[serde(default)]
+    pub base_rate: Option<f64>,
+    /// Lift over the base rate (`hit_rate / base_rate`).
+    #[serde(default)]
+    pub lift: Option<f64>,
+    /// Number of samples backing this bucket.
+    pub sample_n: i64,
+    /// Length of the outcome window in days. Present on history rows.
+    #[serde(default)]
+    pub window_days: Option<i64>,
+    /// Lower bound of the out-of-sample test window (ISO 8601). Present on history rows.
+    #[serde(default)]
+    pub test_from: Option<String>,
+    /// Upper bound of the out-of-sample test window (ISO 8601). Present on history rows.
+    #[serde(default)]
+    pub test_to: Option<String>,
+}
+
+/// One daily snapshot of a signal's per-bucket scorecard (drift series).
+/// Only present when [`SignalPerformanceParams::history`] is `Some(true)`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SignalHistoryEntry {
+    /// When this snapshot was computed (ISO 8601).
+    pub as_of: String,
+    pub buckets: Vec<SignalBucket>,
+}
+
+/// Out-of-sample, machine-readable reliability for a named signal (any tier).
+/// Each nullable field is `None` when the underlying data was unavailable.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SignalPerformance {
+    /// Signal name (e.g. "coordination_count").
+    pub signal: String,
+    /// Metric family (e.g. "forward_return"). Absent before any data is computed.
+    #[serde(default)]
+    pub metric_type: Option<String>,
+    /// Outcome label being measured (e.g. "peak_2x_6h"). Absent before any data is computed.
+    #[serde(default)]
+    pub outcome: Option<String>,
+    /// Human-readable description of the backtest methodology.
+    #[serde(default)]
+    pub methodology: Option<String>,
+    /// When the latest snapshot was computed (ISO 8601). Absent before any data is computed.
+    #[serde(default)]
+    pub as_of: Option<String>,
+    /// Length of the outcome window in days.
+    #[serde(default)]
+    pub window_days: Option<i64>,
+    /// Overall base rate for the signal (0–1).
+    #[serde(default)]
+    pub base_rate: Option<f64>,
+    /// Lower bound of the out-of-sample test window (ISO 8601).
+    #[serde(default)]
+    pub test_from: Option<String>,
+    /// Upper bound of the out-of-sample test window (ISO 8601).
+    #[serde(default)]
+    pub test_to: Option<String>,
+    /// Per-bucket reliability rows for the latest snapshot.
+    pub buckets: Vec<SignalBucket>,
+    /// Per-day snapshot series — only present when `history=true` was requested.
+    #[serde(default)]
+    pub history: Option<Vec<SignalHistoryEntry>>,
+    /// Note set when no performance data has been computed yet.
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default, rename = "_rid")]
+    pub _rid: Option<String>,
+}
+
+/// A catalog entry describing one available signal.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SignalCatalogEntry {
+    /// Signal name — pass to [`Signals::performance`](crate::api::signals::Signals::performance).
+    pub name: String,
+    /// Human-readable description of the backtest methodology.
+    pub methodology: String,
+    /// Fully-qualified URL to fetch this signal's live efficacy.
+    pub performance_endpoint: String,
+}
+
+/// Discovery index for the Signal Scorecard (any tier).
+#[derive(Debug, Clone, Deserialize)]
+pub struct SignalsCatalog {
+    /// Catalog name.
+    pub name: String,
+    /// Catalog description.
+    pub description: String,
+    /// The available signals and how to fetch each one's efficacy.
+    pub signals: Vec<SignalCatalogEntry>,
+    /// Link to human-readable docs.
+    pub docs: String,
+    #[serde(default, rename = "_rid")]
+    pub _rid: Option<String>,
+}
+
 // ─── Wallet Tracker ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize)]
