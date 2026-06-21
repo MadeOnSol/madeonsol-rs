@@ -5,7 +5,7 @@ name: route-parity
 # it needs no cargo. Mirror of the guard in the main madeonsol repo.
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
   workflow_dispatch:
 jobs:
