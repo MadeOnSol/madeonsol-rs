@@ -1,0 +1,21 @@
+name: rust
+# Compiles the crate in the cloud — local cargo is unavailable (Smart App Control)
+# and the prod server has no cargo, so this is the only thing that actually verifies
+# the Rust SDK builds + is publishable before a crates.io release.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build (debug)
+        run: cargo build --verbose
+      - name: Compile all targets (lib + tests + examples, no run)
+        run: cargo check --all-targets --verbose
+      - name: Verify it packages + builds for publish
+        run: cargo publish --dry-run --verbose
