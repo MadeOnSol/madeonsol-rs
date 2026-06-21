@@ -1,0 +1,20 @@
+name: route-parity
+# Fails if this SDK references an API path that doesn't exist in the live
+# MadeOnSol API (rename drift). The check scans .rs string literals for API
+# paths and validates them against the published OpenAPI spec — node-based, so
+# it needs no cargo. Mirror of the guard in the main madeonsol repo.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  route-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Check SDK paths against the live API
+        run: node scripts/route-parity-check.mjs
