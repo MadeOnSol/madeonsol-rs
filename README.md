@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/madeonsol?style=flat-square)](https://crates.io/crates/madeonsol)
 [![docs.rs](https://img.shields.io/docsrs/madeonsol?style=flat-square)](https://docs.rs/madeonsol)
 [![Crates.io downloads](https://img.shields.io/crates/d/madeonsol?style=flat-square)](https://crates.io/crates/madeonsol)
-[![GitHub stars](https://img.shields.io/github/stars/LamboPoewert/madeonsol-rs?style=flat-square&logo=github)](https://github.com/madeonsol/madeonsol-rs)
+[![GitHub stars](https://img.shields.io/github/stars/madeonsol/madeonsol-rs?style=flat-square&logo=github)](https://github.com/madeonsol/madeonsol-rs)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
 > ⭐ **[Star on GitHub](https://github.com/madeonsol/madeonsol-rs)** · 📂 **[Examples](./examples/)** · 📚 **[docs.rs](https://docs.rs/madeonsol)** · 🌐 **[API docs](https://madeonsol.com/api-docs)**
