@@ -51,10 +51,10 @@ webhooks, and the all-DEX firehose:
 | Tier | Price | Daily req | KOL trending sub-hour | Stream | Webhooks | DEX firehose |
 |---|---|---|---|---|---|---|
 | **Free** | $0 | 200 | — | — | — | — |
-| **PRO** | $49/mo | 10,000 | ✅ | ✅ | 3 | — |
-| **ULTRA** | $149/mo | 100,000 | ✅ | ✅ | 10 | ✅ |
+| **PRO** | €43/mo ≈ $49 | 10,000 | ✅ | ✅ | 3 | — |
+| **ULTRA** | €131/mo ≈ $149 | 100,000 | ✅ | ✅ | 10 | ✅ |
 
-Annual: PRO $490/yr, ULTRA $1,490/yr (2 months free).
+Annual: PRO €430/yr, ULTRA €1,310/yr (2 months free). EUR is the canonical price; USD shown for reference.
 
 ## Install
 
