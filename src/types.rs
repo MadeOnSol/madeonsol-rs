@@ -2321,6 +2321,97 @@ pub struct BatchRiskResponse {
     pub _rid: Option<String>,
 }
 
+// ─── Token bundle intelligence (/tokens/{mint}/bundle) ──────────────────────
+
+/// How a token's early cohort of wallets bought in — the strongest coordination
+/// signal detected. `AtomicTx` means multiple wallets bought within a single
+/// transaction (a classic bundle); `SameSlot` means they landed in the same
+/// slot without sharing a tx; `None` means no coordinated cohort was detected.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BundleKind {
+    AtomicTx,
+    SameSlot,
+    None,
+}
+
+impl BundleKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::AtomicTx => "atomic_tx",
+            Self::SameSlot => "same_slot",
+            Self::None => "none",
+        }
+    }
+}
+
+/// Aggregate summary of the bundled cohort for a token.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BundleSummary {
+    /// Number of wallets in the detected bundle cohort.
+    pub wallet_count: u32,
+    /// The kind of coordination detected across the cohort.
+    pub bundle_kind: BundleKind,
+    /// Fraction of supply (0–1) the cohort still holds. `None` when unknown.
+    #[serde(default)]
+    pub held_ratio: Option<f64>,
+    /// Percent of total supply the cohort still holds. `None` when unknown.
+    #[serde(default)]
+    pub held_pct_of_supply: Option<f64>,
+    /// `true` when the entire cohort has fully exited.
+    pub fully_exited: bool,
+    /// Total buy volume attributed to the cohort.
+    pub buy_volume: f64,
+    /// Tokens still held by the cohort.
+    pub tokens_held: f64,
+}
+
+/// A single wallet within a token's bundled cohort. Identity fields
+/// (`is_kol`, `kol_name`, `win_rate`, `bot_confidence`) are populated on ULTRA;
+/// on lower tiers they may be `None`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BundleWallet {
+    /// 1-based rank within the cohort (by holdings / buy volume).
+    pub rank: u32,
+    pub wallet: String,
+    /// Fraction of supply (0–1) this wallet still holds. `None` when unknown.
+    #[serde(default)]
+    pub held_ratio: Option<f64>,
+    /// `true` when this wallet has sold any of its position.
+    pub has_sold: bool,
+    /// `true` when this wallet bought in the same atomic transaction as the cohort.
+    pub atomic: bool,
+    /// `true` when this wallet is a tracked KOL.
+    pub is_kol: bool,
+    /// KOL display name. `None` on lower tiers or when not a KOL.
+    #[serde(default)]
+    pub kol_name: Option<String>,
+    /// KOL win rate. `None` on lower tiers or when unavailable.
+    #[serde(default)]
+    pub win_rate: Option<f64>,
+    /// Bot-confidence classification. `None` on lower tiers or when unavailable.
+    #[serde(default)]
+    pub bot_confidence: Option<String>,
+    /// Tokens still held by this wallet.
+    pub tokens_held: f64,
+}
+
+/// Bundle intelligence for a token (PRO/ULTRA): detects wallets that bought in
+/// the same atomic transaction or same slot, how much of supply they still
+/// hold, and whether they've fully exited. **ULTRA** populates the per-wallet
+/// identity fields; lower tiers may return an empty `wallets` array.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenBundle {
+    pub mint: String,
+    /// Aggregate summary of the bundled cohort.
+    pub bundle: BundleSummary,
+    /// Per-wallet breakdown of the cohort. Empty on lower tiers.
+    #[serde(default)]
+    pub wallets: Vec<BundleWallet>,
+    #[serde(default, rename = "_rid")]
+    pub _rid: Option<String>,
+}
+
 // ─── Token OHLC candles (/tokens/{mint}/candles) ────────────────────────────
 
 /// Query params for [`Token::candles`](crate::api::token::Token::candles).

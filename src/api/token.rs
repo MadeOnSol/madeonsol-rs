@@ -81,6 +81,22 @@ impl Token {
             .await
     }
 
+    /// v0.20 — Bundle intelligence for a token (PRO/ULTRA): detects wallets
+    /// that bought in the same atomic transaction (`bundle_kind = atomic_tx`) or
+    /// the same slot (`same_slot`), how much of supply the cohort still holds,
+    /// and whether it has `fully_exited`. Returns a [`BundleSummary`]
+    /// (`wallet_count`, `bundle_kind`, `held_ratio`, `buy_volume`, …) plus a
+    /// per-wallet [`BundleWallet`] breakdown.
+    ///
+    /// **ULTRA** populates the per-wallet identity fields (`is_kol`, `kol_name`,
+    /// `win_rate`, `bot_confidence`); on lower tiers `wallets` may be empty or
+    /// those fields `None`.
+    pub async fn bundle(&self, mint: &str) -> Result<TokenBundle> {
+        self.core
+            .get(&format!("/tokens/{}/bundle", mint), &())
+            .await
+    }
+
     /// v0.15 — 1-minute OHLC candles for a token, aggregated from the trade
     /// firehose. Returns open/high/low/close, USD volume, trade count, and
     /// market cap per bar. ULTRA unlocks buy/sell volume split, net flow,

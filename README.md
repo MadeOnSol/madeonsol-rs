@@ -18,7 +18,9 @@ async, `tokio`-based, `rustls`-only.
 >
 > **Free tier: 200 requests/day at <https://madeonsol.com/pricing> — no credit card required.**
 
-> **This is the keyed REST SDK** — authenticate with an API key (`msk_…`). It covers the full endpoint surface (KOL intelligence, deployer intel, token risk/buyer-quality, Signal Scorecard, wallet PnL, DEX firehose). Want **x402 pay-per-call** instead — no signup, your agent's wallet pays per request in USDC? Use the TypeScript [`madeonsol-x402`](https://www.npmjs.com/package/madeonsol-x402) or Python [`madeonsol-x402`](https://pypi.org/project/madeonsol-x402/) clients.
+> **This is the keyed REST SDK** — authenticate with an API key (`msk_…`). It covers the full endpoint surface (KOL intelligence, deployer intel, token risk/buyer-quality/bundle, Signal Scorecard, wallet PnL, DEX firehose). Want **x402 pay-per-call** instead — no signup, your agent's wallet pays per request in USDC? Use the TypeScript [`madeonsol-x402`](https://www.npmjs.com/package/madeonsol-x402) or Python [`madeonsol-x402`](https://pypi.org/project/madeonsol-x402/) clients.
+
+> **New in 0.20.0** — **Bundle intelligence.** `client.token.bundle(mint)` (`GET /tokens/{mint}/bundle`, PRO/ULTRA) detects wallets that bought a token in the same atomic transaction or the same slot — bundlers and coordinated snipers — and how much of supply they still hold. Returns a `BundleSummary` (`wallet_count`, `bundle_kind` = `atomic_tx`/`same_slot`/`none`, `held_ratio`, `held_pct_of_supply`, `fully_exited`, `buy_volume`, `tokens_held`) plus a per-wallet `Vec<BundleWallet>` breakdown (`rank`, `wallet`, `held_ratio`, `has_sold`, `atomic`, `tokens_held`). **ULTRA** populates wallet identity fields (`is_kol`, `kol_name`, `win_rate`, `bot_confidence`); lower tiers may return an empty `wallets` array. New types: `TokenBundle`, `BundleSummary`, `BundleWallet`, `BundleKind`.
 
 > **New in 0.18.0** — **Almost-bonded tokens + trending sorts.** `client.token.almost_bonded(&params)` (`GET /tokens/almost-bonded`, PRO/ULTRA) returns pre-bond pump.fun tokens near graduation, ranked by velocity: each `AlmostBondedToken` carries `progress_pct`, `velocity_pct_per_min`, `eta_minutes`, a `stalled` flag, `real_sol_reserves`, `market_cap_usd`, `liquidity_usd`, `authorities_revoked`, `deployer_tier`, and `age_minutes`. `AlmostBondedParams` filters by `min_progress`/`max_progress`, `min_velocity_pct_per_min`, `max_age_minutes`, `deployer_tier`, `authority_revoked`, and `min_liq`, and picks the `AlmostBondedSort` order (`VelocityDesc` default, `ProgressDesc`, `EtaAsc`). New types: `AlmostBondedParams`, `AlmostBondedSort`, `AlmostBondedToken`, `AlmostBondedResponse`. `client.token.list(&params)` also accepts four new momentum `sort` values: `"mc_change_5m_desc"`, `"mc_change_1h_desc"`, `"volume_1h_desc"`, and `"trending"`.
 
@@ -110,7 +112,7 @@ The `MadeOnSol` client exposes namespaced sub-clients:
 | `client.kol` | KOL feed, leaderboard, coordination, PnL, trending tokens, alerts, compare, **first_touches**, **scout_leaderboard**, **coordination_history** |
 | `client.deployer` | Pump.fun deployer leaderboard, alerts, trajectory (+ daily snapshots), bonded tokens |
 | `client.alpha` | Alpha-wallet leaderboard, profiles, cap tables, buyer quality |
-| `client.token` | Per-mint snapshot, batch lookup, buyer quality, **kol_consensus**, **peak_history**, **risk**, **batch_risk**, **candles**, **token_flow**, **almost_bonded**, directory list |
+| `client.token` | Per-mint snapshot, batch lookup, buyer quality, **kol_consensus**, **peak_history**, **risk**, **batch_risk**, **bundle**, **candles**, **token_flow**, **almost_bonded**, directory list |
 | `client.wallet_tracker` | Track arbitrary Solana wallets — watchlist CRUD, swap/transfer history |
 | `client.wallet` | Universal wallet endpoints — stats + cross-product flags + derived analytics, FIFO PnL, open positions, paginated trades (PRO+) |
 | `client.coordination_alerts` | Push alerts on coordinated buying (PRO/ULTRA) |
@@ -414,6 +416,36 @@ for t in res.tokens {
     } else {
         println!("{}: risk {:?} ({:?})", t.mint, t.risk_score, t.band);
     }
+}
+# Ok(())
+# }
+```
+
+## Bundle intelligence *(new in 0.20)*
+
+Detect wallets that bought a token in the same atomic transaction or same slot —
+bundlers and coordinated snipers — how much of supply they still hold, and
+whether the cohort has fully exited (PRO/ULTRA). **ULTRA** additionally labels
+each wallet with KOL identity and bot-confidence.
+
+```rust
+# async fn run(client: madeonsol::MadeOnSol) -> Result<(), Box<dyn std::error::Error>> {
+let b = client
+    .token
+    .bundle("So11111111111111111111111111111111111111112")
+    .await?;
+
+println!(
+    "{} bundled wallets ({:?}), holding {:?} of supply, fully_exited={}",
+    b.bundle.wallet_count, b.bundle.bundle_kind, b.bundle.held_ratio, b.bundle.fully_exited,
+);
+
+// ULTRA — per-wallet identity is populated
+for w in b.wallets {
+    println!(
+        "#{} {} — held {:?}, sold={}, kol={:?}",
+        w.rank, w.wallet, w.held_ratio, w.has_sold, w.kol_name,
+    );
 }
 # Ok(())
 # }
