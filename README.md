@@ -283,7 +283,7 @@ println!("{} deploys from watchlisted deployers", tracked.count);
 
 ## Price alerts *(new in 0.10)*
 
-Get notified when a token's market cap drops below a threshold (and optionally on recovery). PRO: 5 rules, ULTRA: 20 rules. Delivered via WebSocket channel `price:alerts` and/or HMAC-signed webhook.
+Get notified when a token's market cap drops below a threshold (and optionally on recovery). PRO: 5 rules, ULTRA: 25 rules. Delivered via WebSocket channel `price:alerts` and/or HMAC-signed webhook.
 
 ```rust
 # async fn run(client: madeonsol::MadeOnSol) -> Result<(), Box<dyn std::error::Error>> {
