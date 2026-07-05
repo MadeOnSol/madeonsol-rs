@@ -1837,6 +1837,48 @@ pub struct DeployerTrajectoryResponse {
     pub daily_snapshots: Option<Vec<DeployerDailySnapshot>>,
 }
 
+// ─── Deployer history (/deployer-hunter/{wallet}/history) ────────────────────
+
+/// Query params for [`Deployer::history`](crate::api::deployer::Deployer::history).
+/// Unset fields are omitted from the query string.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct DeployerHistoryParams {
+    /// Number of daily snapshots to return (1..=365). Defaults server-side when unset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// A single daily performance snapshot for a deployer wallet.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerSnapshot {
+    /// Snapshot date (ISO 8601).
+    pub date: String,
+    pub tier: String,
+    pub is_tracked: bool,
+    pub total_deployed: i64,
+    pub total_bonded: i64,
+    /// Lifetime bonding rate. `None` when unavailable.
+    #[serde(default)]
+    pub bonding_rate: Option<f64>,
+    /// Recent (rolling) bond rate. `None` when unavailable.
+    #[serde(default)]
+    pub recent_bond_rate: Option<f64>,
+    /// Average peak market cap across deploys. `None` when unavailable.
+    #[serde(default)]
+    pub avg_peak_mc: Option<f64>,
+    /// Peak market cap of the best token. `None` when unavailable.
+    #[serde(default)]
+    pub best_token_peak_mc: Option<f64>,
+}
+
+/// Daily performance snapshots for a deployer wallet.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerHistoryResponse {
+    pub is_deployer: bool,
+    pub wallet: String,
+    pub snapshots: Vec<DeployerSnapshot>,
+}
+
 // ─── Alpha Wallet Intelligence ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -2410,6 +2452,59 @@ pub struct TokenBundle {
     pub wallets: Vec<BundleWallet>,
     #[serde(default, rename = "_rid")]
     pub _rid: Option<String>,
+}
+
+// ─── Token pools (/tokens/{mint}/pools) ─────────────────────────────────────
+
+/// A single liquidity pool for a token across a DEX.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Pool {
+    pub pool_address: String,
+    pub dex: String,
+    pub quote_mint: String,
+    /// Pool liquidity in USD. `None` when unknown.
+    #[serde(default)]
+    pub liquidity_usd: Option<f64>,
+    /// Last observed price in SOL. `None` when unknown.
+    #[serde(default)]
+    pub last_price_sol: Option<f64>,
+    /// Timestamp of the last swap (ISO 8601). `None` when unknown.
+    #[serde(default)]
+    pub last_swap_at: Option<String>,
+    /// AMM identifier for the pool. `None` when unavailable.
+    #[serde(default)]
+    pub amm_id: Option<String>,
+    /// `true` when the pool is currently active.
+    pub is_active: bool,
+}
+
+/// Aggregate summary across all of a token's pools.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PoolsSummary {
+    pub pool_count: i64,
+    pub active_pool_count: i64,
+    pub dex_count: i64,
+    pub dexes: Vec<String>,
+    /// Total liquidity across all pools in USD. `None` when unknown.
+    #[serde(default)]
+    pub total_liquidity_usd: Option<f64>,
+    /// Address of the primary (deepest) pool. `None` when unknown.
+    #[serde(default)]
+    pub primary_pool: Option<String>,
+    /// DEX of the primary pool. `None` when unknown.
+    #[serde(default)]
+    pub primary_dex: Option<String>,
+    /// Share of total liquidity held by the top pool (percent). `None` when unknown.
+    #[serde(default)]
+    pub top_pool_share_pct: Option<f64>,
+}
+
+/// All liquidity pools for a token plus an aggregate summary.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenPoolsResponse {
+    pub mint: String,
+    pub pools: Vec<Pool>,
+    pub summary: PoolsSummary,
 }
 
 // ─── Token OHLC candles (/tokens/{mint}/candles) ────────────────────────────

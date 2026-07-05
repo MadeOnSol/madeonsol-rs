@@ -103,4 +103,22 @@ impl Deployer {
             )
             .await
     }
+
+    /// v0.20 — Daily performance snapshots for a deployer wallet — tier,
+    /// tracked status, cumulative deploys/bonds, bonding rates, and peak-MC
+    /// history over time. `limit` (1..=365) caps the number of daily snapshots;
+    /// an unset value is omitted from the query string. `is_deployer` is `false`
+    /// when the wallet has never deployed a token.
+    pub async fn history(
+        &self,
+        wallet: &str,
+        limit: Option<u32>,
+    ) -> Result<DeployerHistoryResponse> {
+        self.core
+            .get(
+                &format!("/deployer-hunter/{}/history", wallet),
+                &DeployerHistoryParams { limit },
+            )
+            .await
+    }
 }

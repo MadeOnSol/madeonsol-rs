@@ -97,6 +97,18 @@ impl Token {
             .await
     }
 
+    /// v0.20 — All liquidity pools for a token across every tracked DEX, plus an
+    /// aggregate [`PoolsSummary`] (`pool_count`, `active_pool_count`, `dex_count`,
+    /// `dexes`, `total_liquidity_usd`, `primary_pool`, `primary_dex`,
+    /// `top_pool_share_pct`). Each [`Pool`] carries its `pool_address`, `dex`,
+    /// `quote_mint`, `liquidity_usd`, `last_price_sol`, `last_swap_at`, `amm_id`,
+    /// and an `is_active` flag.
+    pub async fn pools(&self, mint: &str) -> Result<TokenPoolsResponse> {
+        self.core
+            .get(&format!("/tokens/{}/pools", mint), &())
+            .await
+    }
+
     /// v0.15 — 1-minute OHLC candles for a token, aggregated from the trade
     /// firehose. Returns open/high/low/close, USD volume, trade count, and
     /// market cap per bar. ULTRA unlocks buy/sell volume split, net flow,
