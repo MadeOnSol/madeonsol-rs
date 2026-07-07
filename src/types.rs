@@ -3301,6 +3301,61 @@ pub struct WalletTradesResponse {
     pub filters: WalletTradesFilters,
 }
 
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct WalletHoldingsParams {
+    /// 1–500; default 200.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// Minimum USD value per holding; default 0.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_value_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Holding {
+    pub mint: String,
+    pub symbol: Option<String>,
+    pub name: Option<String>,
+    pub amount: f64,
+    /// Raw base-unit amount as a decimal string (no precision loss).
+    pub amount_raw: String,
+    pub decimals: u32,
+    /// "spl" | "token2022".
+    pub token_program: String,
+    pub price_usd: Option<f64>,
+    pub value_usd: Option<f64>,
+    pub market_cap_usd: Option<f64>,
+    pub is_bonded: Option<bool>,
+    pub trade_derived_amount: Option<f64>,
+    /// On-chain amount minus trade-derived net position — exposes non-swap
+    /// flows (airdrops, insider funding, wallet-hopping).
+    pub transfer_delta: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletHoldingsSummary {
+    pub token_accounts: u32,
+    pub non_zero: u32,
+    pub returned: u32,
+    pub priced: u32,
+    pub total_value_usd: f64,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletHoldingsResponse {
+    pub address: String,
+    pub sol_balance: f64,
+    pub holdings: Vec<Holding>,
+    pub summary: WalletHoldingsSummary,
+    pub verified_at: String,
+    pub trade_window_days: u32,
+    #[serde(default)]
+    pub cache_hit: Option<bool>,
+    #[serde(default)]
+    pub ttl_seconds: Option<u64>,
+}
+
 // ─── Tools ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default, Serialize)]

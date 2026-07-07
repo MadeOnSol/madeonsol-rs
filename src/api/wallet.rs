@@ -49,6 +49,25 @@ impl Wallet {
             .await
     }
 
+    /// Verified CURRENT on-chain holdings — reads the wallet's actual SPL +
+    /// Token-2022 token accounts and SOL balance from chain, enriches each with
+    /// our price / MC / name / symbol data, and computes `transfer_delta`
+    /// (on-chain amount minus trade-derived net position) to expose non-swap
+    /// flows: airdrops, insider funding, wallet-hopping.
+    ///
+    /// Distinct from [`positions`](Self::positions), which is trade-derived
+    /// FIFO — holdings is "what they actually hold right now". `limit` 1–500
+    /// (default 200), `min_value_usd` ≥ 0 (default 0). ULTRA only.
+    pub async fn holdings(
+        &self,
+        address: &str,
+        params: &WalletHoldingsParams,
+    ) -> Result<WalletHoldingsResponse> {
+        self.core
+            .get(&format!("/wallet/{}/holdings", address), params)
+            .await
+    }
+
     /// Cursor-paginated raw trades. Default window is the last 90 days;
     /// override via `since` / `until` (Unix epoch seconds). Default limit
     /// 100, max 500.
