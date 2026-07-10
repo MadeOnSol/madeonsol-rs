@@ -2285,6 +2285,11 @@ pub struct RiskInputs {
     #[serde(default)]
     pub kol_signal: Option<String>,
     pub is_blacklisted: bool,
+    /// v0.22 — slot-window launch-snipe rollup ([`SniperFootprint`]). `None`
+    /// when no rollup exists for the mint; inside it, `data_available = false`
+    /// means "not observable", NOT "0 snipes".
+    #[serde(default)]
+    pub sniper_footprint: Option<SniperFootprint>,
 }
 
 /// Transparent 0–100 token rug-risk/safety score (PRO/ULTRA). Higher = riskier.
@@ -2623,6 +2628,85 @@ pub struct TokenFlowResponse {
     pub trades_per_wallet: f64,
 }
 
+// ─── Token trade tape (/tokens/{mint}/trades, v0.22) ────────────────────────
+
+/// Query params for [`Token::trades`](crate::api::token::Token::trades).
+/// Unset fields are omitted from the query string.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TokenTradesParams {
+    /// 1–500; default 100.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// From `next_cursor` of a previous response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<WalletTradeAction>,
+    /// Filter to a single wallet address (base58).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet: Option<String>,
+    /// Unix epoch seconds; default FULL history (capture starts 2026-04-12).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<i64>,
+    /// Unix epoch seconds; default now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub until: Option<i64>,
+}
+
+/// One raw trade on a token's tape.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenTrade {
+    pub tx_signature: String,
+    pub wallet_address: String,
+    /// `"buy"` | `"sell"`.
+    pub action: String,
+    pub sol_amount: f64,
+    pub token_amount: f64,
+    #[serde(default)]
+    pub price_sol: Option<f64>,
+    #[serde(default)]
+    pub price_usd: Option<f64>,
+    #[serde(default)]
+    pub early_buyer_rank: Option<i64>,
+    #[serde(default)]
+    pub slot: Option<i64>,
+    /// Unix epoch seconds.
+    pub block_time: i64,
+    /// ISO 8601 — `block_time` rendered as a timestamp.
+    pub traded_at: String,
+}
+
+/// Echo of the filters a token-trades page was produced with.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenTradesFilters {
+    #[serde(default)]
+    pub action: Option<String>,
+    #[serde(default)]
+    pub wallet: Option<String>,
+    pub since: i64,
+    pub until: i64,
+}
+
+/// Coverage honesty block: where the tape starts and what pipeline feeds it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenTradesCoverage {
+    /// Unix epoch seconds — capture starts 2026-04-12.
+    pub history_start: i64,
+    /// e.g. `"pump.fun pipeline"` — trades outside that pipeline aren't on the tape.
+    pub scope: String,
+}
+
+/// Response of [`Token::trades`](crate::api::token::Token::trades).
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenTradesResponse {
+    pub mint: String,
+    pub trades: Vec<TokenTrade>,
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
+    pub filters: TokenTradesFilters,
+    pub coverage: TokenTradesCoverage,
+}
+
 // ─── Signal Scorecard (/signals) ────────────────────────────────────────────
 
 /// Query params for [`Signals::performance`](crate::api::signals::Signals::performance).
@@ -2852,6 +2936,27 @@ pub struct WalletTrackerDeleteResponse {
 
 // ─── Sniper: deshred pre-confirm pump.fun deploy feed (PRO + ULTRA) ─────────
 
+/// Slot-window launch-snipe rollup (v0.22): buys landing in slots
+/// `[deploy-1 .. deploy+3]`. Appears on sniper deploys (`footprint`) and in
+/// token risk inputs (`sniper_footprint`).
+///
+/// `data_available = false` means the mint has no rows in the trade pipeline
+/// (write-gate) — "not observable", NOT "0 snipes". `supply_pct` is
+/// pump.fun-only (fixed 1B supply denominator) and `None` otherwise.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SniperFootprint {
+    pub buys: i64,
+    pub buyers: i64,
+    pub sol: f64,
+    #[serde(default)]
+    pub supply_pct: Option<f64>,
+    /// How many of the window's buys came from known sniper wallets.
+    pub sniper_wallet_buys: i64,
+    pub data_available: bool,
+    /// ISO 8601 — when the rollup was computed.
+    pub as_of: String,
+}
+
 /// A pump.fun deploy detected via shred-level ("deshred") reconstruction,
 /// ~500ms before the chain confirms it. Detection is pre-execution, so
 /// `confirmed_on_chain` is `None` until reconciled.
@@ -2877,6 +2982,11 @@ pub struct SniperDeploy {
     pub deployer_labeled_tokens: Option<i64>,
     pub confirmed_on_chain: Option<bool>,
     pub confirmed_at: Option<String>,
+    /// v0.22 — slot-window snipe rollup. `None` for deploys younger than the
+    /// rollup's ~10-min settle window or outside the trade-pipeline write-gate
+    /// (absent, not zero).
+    #[serde(default)]
+    pub footprint: Option<SniperFootprint>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -2976,20 +3086,52 @@ pub struct WalletStats {
     pub window_days: u32,
 }
 
+/// Dump-cluster cohort counts for a wallet (rolling 42-day window, recomputed
+/// daily — up to ~48h stale). `as_of` is the computation timestamp.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletDumpCluster {
+    pub dump_cohorts: i64,
+    pub runner_cohorts: i64,
+    pub total_cohorts: i64,
+    pub as_of: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct WalletFlags {
     pub is_kol: bool,
     pub kol_name: Option<String>,
     /// True if the wallet appears in `mv_alpha_wallets`.
     pub is_alpha_tracked: bool,
-    /// 0–1; higher = more bot-like. Sourced from the alpha classifier.
-    pub bot_confidence: Option<f64>,
+    /// Text enum `"none"` | `"low"` | `"medium"` | `"high"`; `None` when the
+    /// wallet isn't alpha-tracked. Sourced from the alpha classifier.
+    ///
+    /// v0.22 type FIX: this was previously (mis)typed as `Option<f64>` — the
+    /// wire value is a string enum, and a server bug made it always `null`
+    /// before 2026-07-10; it now carries real values.
+    pub bot_confidence: Option<String>,
     pub alpha_win_rate: Option<f64>,
     pub alpha_net_pnl_sol: Option<f64>,
     pub alpha_tokens_traded: Option<u64>,
     pub is_deployer: bool,
     pub deployer_tokens_deployed: Option<u64>,
     pub deployer_bonding_rate: Option<f64>,
+    // v0.22 reputation flags. Scope caveat: all three derive from the pump.fun
+    // trade pipeline — `false` means "not observed", NOT "verified clean".
+    /// ≥5 tokens early-bought & ≥80% flipped <5min. Behavior-updated (~12min
+    /// cron), so it can clear if the wallet reforms. Pipeline-scoped.
+    #[serde(default)]
+    pub is_sniper: bool,
+    /// Bought >1 token in the same block, EVER — a lifetime flag.
+    #[serde(default)]
+    pub is_bundler: bool,
+    /// ≥5 dump cohorts + 0 runner cohorts in a rolling 42-day window
+    /// (recomputed daily, up to ~48h stale).
+    #[serde(default)]
+    pub is_dumper: bool,
+    /// Raw dump-cluster cohort counts behind `is_dumper`; `None` when the
+    /// wallet has no dump-cluster record.
+    #[serde(default)]
+    pub dump_cluster: Option<WalletDumpCluster>,
 }
 
 // v1.8.1 enrichments — additive, all Option<...> so old SDK builds keep
@@ -3299,6 +3441,52 @@ pub struct WalletTradesResponse {
     pub next_cursor: Option<String>,
     pub has_more: bool,
     pub filters: WalletTradesFilters,
+}
+
+// ─── Wallet batch classify (/wallet/batch/classify, v0.22) ──────────────────
+
+/// Request body for [`Wallet::batch_classify`](crate::api::wallet::Wallet::batch_classify).
+#[derive(Debug, Clone, Serialize)]
+pub struct WalletBatchRequest {
+    /// 1–100 base58 wallet addresses. Duplicates are removed server-side.
+    pub wallets: Vec<String>,
+}
+
+/// Reputation flags for one wallet in a batch-classify response. Field values
+/// match the `flags` block of [`WalletStatsResponse`] exactly.
+///
+/// Scope caveat: `is_sniper` / `is_bundler` / `is_dumper` derive from the
+/// pump.fun trade pipeline — `false` means "not observed", NOT "verified
+/// clean". `is_bundler` is a lifetime flag; `is_dumper` uses a rolling 42-day
+/// window (recomputed daily, up to ~48h stale).
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletClassification {
+    pub address: String,
+    pub is_sniper: bool,
+    pub is_bundler: bool,
+    pub is_dumper: bool,
+    pub is_kol: bool,
+    #[serde(default)]
+    pub kol_name: Option<String>,
+    /// Text enum `"none"` | `"low"` | `"medium"` | `"high"`; `None` when the
+    /// wallet isn't alpha-tracked.
+    #[serde(default)]
+    pub bot_confidence: Option<String>,
+    /// Raw dump-cluster cohort counts behind `is_dumper`; `None` when the
+    /// wallet has no dump-cluster record.
+    #[serde(default)]
+    pub dump_cluster: Option<WalletDumpCluster>,
+}
+
+/// Response of [`Wallet::batch_classify`](crate::api::wallet::Wallet::batch_classify).
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletBatchClassifyResponse {
+    /// One entry per unique input wallet, in de-duplicated input order.
+    pub wallets: Vec<WalletClassification>,
+    /// Number of unique wallets classified.
+    pub count: u32,
+    /// ISO 8601 — when the batch was computed.
+    pub as_of: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

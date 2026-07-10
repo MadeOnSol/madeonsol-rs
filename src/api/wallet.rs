@@ -83,4 +83,26 @@ impl Wallet {
             .get(&format!("/wallet/{}/trades", address), params)
             .await
     }
+
+    /// v0.22 — Bulk wallet reputation flags for 1–100 wallets in one call
+    /// (counts as 1 request against quota). PRO/ULTRA.
+    ///
+    /// Each [`WalletClassification`] carries `is_sniper` / `is_bundler` /
+    /// `is_dumper` / `is_kol` (+ `kol_name`), `bot_confidence` (text enum
+    /// `"none"`/`"low"`/`"medium"`/`"high"`, `None` when not alpha-tracked)
+    /// and a `dump_cluster` cohort block — identical semantics to the `flags`
+    /// block of [`stats`](Self::stats).
+    ///
+    /// Scope caveat: the reputation flags derive from the pump.fun trade
+    /// pipeline — `false` means "not observed", NOT "verified clean".
+    /// `is_bundler` is a lifetime flag; `is_dumper` uses a rolling 42-day
+    /// window (recomputed daily, up to ~48h stale).
+    pub async fn batch_classify(
+        &self,
+        wallets: Vec<String>,
+    ) -> Result<WalletBatchClassifyResponse> {
+        self.core
+            .post_json("/wallet/batch/classify", &WalletBatchRequest { wallets })
+            .await
+    }
 }

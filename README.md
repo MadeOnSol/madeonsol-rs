@@ -22,6 +22,8 @@ async, `tokio`-based, `rustls`-only.
 
 > **This is the keyed REST SDK** — authenticate with an API key (`msk_…`). It covers the full endpoint surface (KOL intelligence, deployer intel, token risk/buyer-quality/bundle, Signal Scorecard, wallet PnL, DEX firehose). Want **x402 pay-per-call** instead — no signup, your agent's wallet pays per request in USDC? Use the TypeScript [`madeonsol-x402`](https://www.npmjs.com/package/madeonsol-x402) or Python [`madeonsol-x402`](https://pypi.org/project/madeonsol-x402/) clients.
 
+> **New in 0.22.0** — **Batch wallet classification + token trade tape + `bot_confidence` type fix.** `client.wallet.batch_classify(wallets)` (`POST /wallet/batch/classify`, PRO/ULTRA) returns reputation flags for 1–100 wallets in one call (counts as 1 request): each `WalletClassification` carries `is_sniper` / `is_bundler` / `is_dumper` / `is_kol` (+ `kol_name`), `bot_confidence`, and a `dump_cluster` cohort block. Flags are pump.fun-pipeline scoped — `false` = not observed, NOT verified clean; `is_bundler` is lifetime, `is_dumper` is a rolling 42-day window. `client.token.trades(mint, &params)` (`GET /tokens/{mint}/trades`, PRO/ULTRA) is the mint-scoped trade tape — cursor-paginated raw trades (default FULL history; capture starts 2026-04-12) with a machine-readable `coverage` honesty block. `WalletFlags` gains the same reputation flags + `dump_cluster`, and — **breaking type fix** — `WalletFlags.bot_confidence` is now `Option<String>` (text enum `"none"`/`"low"`/`"medium"`/`"high"`); it was mistyped `Option<f64>` and a server bug made it always `null` before, so no working code could have depended on the old type. `RiskInputs` gains `sniper_footprint` and `SniperDeploy` gains `footprint` — the slot-window launch-snipe rollup (`SniperFootprint`: `buys`, `buyers`, `sol`, `supply_pct`, `sniper_wallet_buys`, `data_available`, `as_of`; `None` = not observable, not zero). New types: `WalletBatchRequest`, `WalletClassification`, `WalletBatchClassifyResponse`, `WalletDumpCluster`, `TokenTradesParams`, `TokenTrade`, `TokenTradesFilters`, `TokenTradesCoverage`, `TokenTradesResponse`, `SniperFootprint`.
+>
 > **New in 0.21.0** — **Verified wallet holdings.** `client.wallet.holdings(address, &params)` (`GET /wallet/{address}/holdings`, ULTRA only) reads the wallet's actual SPL + Token-2022 token accounts and SOL balance directly from chain, enriches each with our price / MC / name / symbol data, and computes `transfer_delta` (on-chain amount minus trade-derived net position) to expose non-swap flows — airdrops, insider funding, wallet-hopping. Distinct from `client.wallet.positions()` (trade-derived FIFO): holdings is "what they actually hold right now". `WalletHoldingsResponse` carries `address`, `sol_balance`, a `Vec<Holding>` (each with `mint`, `symbol`, `name`, `amount`, `amount_raw`, `decimals`, `token_program` = `"spl"`/`"token2022"`, `price_usd`, `value_usd`, `market_cap_usd`, `is_bonded`, `trade_derived_amount`, `transfer_delta`), a `WalletHoldingsSummary` (`token_accounts`, `non_zero`, `returned`, `priced`, `total_value_usd`, `truncated`), `verified_at`, `trade_window_days`, `cache_hit`, and `ttl_seconds`. `WalletHoldingsParams` filters by `limit` (1–500, default 200) and `min_value_usd` (≥0, default 0). New types: `WalletHoldingsParams`, `WalletHoldingsResponse`, `WalletHoldingsSummary`, `Holding`.
 
 > **New in 0.20.1** — **Token pools + deployer history.** `client.token.pools(mint)` (`GET /tokens/{mint}/pools`) returns every liquidity pool for a token across all tracked DEXes plus an aggregate `PoolsSummary` (`pool_count`, `active_pool_count`, `dex_count`, `dexes`, `total_liquidity_usd`, `primary_pool`, `primary_dex`, `top_pool_share_pct`). Each `Pool` carries `pool_address`, `dex`, `quote_mint`, `liquidity_usd`, `last_price_sol`, `last_swap_at`, `amm_id`, and `is_active`. `client.deployer.history(wallet, limit)` (`GET /deployer-hunter/{wallet}/history`, `limit` 1..=365) returns daily performance snapshots: each `DeployerSnapshot` has `date`, `tier`, `is_tracked`, `total_deployed`, `total_bonded`, `bonding_rate`, `recent_bond_rate`, `avg_peak_mc`, `best_token_peak_mc`; `is_deployer` is `false` when the wallet has never deployed. New types: `TokenPoolsResponse`, `Pool`, `PoolsSummary`, `DeployerHistoryParams`, `DeployerHistoryResponse`, `DeployerSnapshot`.
@@ -68,7 +70,7 @@ Annual: PRO €430/yr, ULTRA €1,310/yr (2 months free). EUR is the canonical p
 
 ```toml
 [dependencies]
-madeonsol = "0.18"
+madeonsol = "0.22"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -118,9 +120,9 @@ The `MadeOnSol` client exposes namespaced sub-clients:
 | `client.kol` | KOL feed, leaderboard, coordination, PnL, trending tokens, alerts, compare, **first_touches**, **scout_leaderboard**, **coordination_history** |
 | `client.deployer` | Pump.fun deployer leaderboard, alerts, trajectory (+ daily snapshots), **history**, bonded tokens |
 | `client.alpha` | Alpha-wallet leaderboard, profiles, cap tables, buyer quality |
-| `client.token` | Per-mint snapshot, batch lookup, buyer quality, **kol_consensus**, **peak_history**, **risk**, **batch_risk**, **bundle**, **pools**, **candles**, **token_flow**, **almost_bonded**, directory list |
+| `client.token` | Per-mint snapshot, batch lookup, buyer quality, **kol_consensus**, **peak_history**, **risk**, **batch_risk**, **bundle**, **pools**, **candles**, **token_flow**, **trades** *(new 0.22 — mint-scoped trade tape)*, **almost_bonded**, directory list |
 | `client.wallet_tracker` | Track arbitrary Solana wallets — watchlist CRUD, swap/transfer history |
-| `client.wallet` | Universal wallet endpoints — stats + cross-product flags + derived analytics, FIFO PnL, open positions, paginated trades (PRO+), verified on-chain holdings (ULTRA) |
+| `client.wallet` | Universal wallet endpoints — stats + cross-product flags + derived analytics, FIFO PnL, open positions, paginated trades, **batch_classify** *(new 0.22 — bulk reputation flags, 1–100 wallets)* (PRO+), verified on-chain holdings (ULTRA) |
 | `client.coordination_alerts` | Push alerts on coordinated buying (PRO/ULTRA) |
 | `client.first_touch_subscriptions` | Push alerts on first-KOL-touch events (ULTRA) |
 | `client.price_alerts` *(new 0.10)* | MC-drop / recovery price alert rules CRUD + event history (PRO/ULTRA) |
@@ -422,6 +424,47 @@ for t in res.tokens {
     } else {
         println!("{}: risk {:?} ({:?})", t.mint, t.risk_score, t.band);
     }
+}
+# Ok(())
+# }
+```
+
+## Batch wallet classification + token trade tape *(new in 0.22)*
+
+Screen up to 100 wallets for sniper / bundler / dumper / KOL reputation in one
+request, and replay any token's raw trade history with cursor pagination
+(PRO/ULTRA). Reputation flags are pump.fun-pipeline scoped — `false` means
+"not observed", not "verified clean".
+
+```rust
+# async fn run(client: madeonsol::MadeOnSol) -> Result<(), Box<dyn std::error::Error>> {
+use madeonsol::types::TokenTradesParams;
+
+// 1. Bulk reputation screen — one request for up to 100 wallets.
+let res = client
+    .wallet
+    .batch_classify(vec![
+        "ASVzakePP6GNg9r95d4LPZHJDMXun6L6E4um4pu5ybJk".into(),
+        "7dExa4pQ8XkbwsjXCADEHVXpXU9DDSzM8yBslkzX4pQ8".into(),
+    ])
+    .await?;
+for w in res.wallets {
+    println!(
+        "{}: sniper={} bundler={} dumper={} kol={:?} bot={:?}",
+        w.address, w.is_sniper, w.is_bundler, w.is_dumper, w.kol_name, w.bot_confidence,
+    );
+}
+
+// 2. Token trade tape — full history (from 2026-04-12), newest first.
+let mut params = TokenTradesParams { limit: Some(500), ..Default::default() };
+loop {
+    let page = client
+        .token
+        .trades("So11111111111111111111111111111111111111112", &params)
+        .await?;
+    for t in &page.trades { /* t.tx_signature, t.action, t.sol_amount, … */ }
+    if !page.has_more { break; }
+    params.cursor = page.next_cursor;
 }
 # Ok(())
 # }

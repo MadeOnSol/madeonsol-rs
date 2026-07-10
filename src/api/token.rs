@@ -123,6 +123,30 @@ impl Token {
             .await
     }
 
+    /// v0.22 — Mint-scoped trade tape: cursor-paginated raw trades for one
+    /// token, newest first (PRO/ULTRA) — the backfill/history complement to
+    /// the live DEX firehose stream.
+    ///
+    /// Each [`TokenTrade`] carries `tx_signature`, `wallet_address`, `action`,
+    /// `sol_amount`, `token_amount`, `price_sol`/`price_usd`,
+    /// `early_buyer_rank`, `slot`, `block_time`, and `traded_at`. Filter via
+    /// [`TokenTradesParams`] (`action`, `wallet`, `since`/`until` — default is
+    /// FULL history, not 90 days). Pass `next_cursor` from the previous
+    /// response to page older trades; `has_more` tells you when to stop.
+    ///
+    /// Coverage honesty: capture starts 2026-04-12 and is pump.fun-pipeline
+    /// scoped — the response's [`TokenTradesCoverage`] block
+    /// (`history_start`, `scope`) makes both limits machine-readable.
+    pub async fn trades(
+        &self,
+        mint: &str,
+        params: &TokenTradesParams,
+    ) -> Result<TokenTradesResponse> {
+        self.core
+            .get(&format!("/tokens/{}/trades", mint), params)
+            .await
+    }
+
     /// v0.16 — Aggregated buy/sell flow for a token over a rolling window (PRO+).
     /// Returns unique wallet/buyer/seller counts, buy/sell counts and SOL volumes,
     /// `net_sol` (`buy_sol` − `sell_sol`), and `trades_per_wallet`.
