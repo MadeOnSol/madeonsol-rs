@@ -75,9 +75,34 @@ impl Token {
     /// alongside a per-factor breakdown (mint/freeze authority, liquidity,
     /// transfer fee, launch cohort, deployer reputation, blacklist, …) and the
     /// raw `inputs` each factor was derived from — nothing is opaque.
+    ///
+    /// v0.23 adds the top-level `dev` block ([`RiskDev`], `None` when the mint
+    /// has no tracked deploy row): dev buy at create, post-create buys/sells,
+    /// live on-chain `holdings_tokens` / `wallet_empty`, and a coverage-gated
+    /// `transferred_out` flag.
     pub async fn risk(&self, mint: &str) -> Result<TokenRisk> {
         self.core
             .get(&format!("/tokens/{}/risk", mint), &())
+            .await
+    }
+
+    /// v0.23 — Per-pool price-impact / slippage depth (PRO+). Answers "how
+    /// much SOL to move the price N%" and the impact of each buy size, per
+    /// pool. Exact for constant-product AMMs (served from streamed reserves,
+    /// zero-RPC) and correct for pump.fun / bonk curves via a live read of the
+    /// curve's virtual reserves. Concentrated pools (CLMM/Orca/DLMM),
+    /// Meteora-DBC curves, and unclassified pools come back in
+    /// `unsupported_pools` with a `reason` rather than a wrong number.
+    ///
+    /// Use [`DepthParams`] to pick the SOL buy sizes (`?sizes=` CSV, max 8,
+    /// each `> 0` and `<= 10000`; default `0.5,1,5,10`) —
+    /// [`DepthParams::from_sizes`] builds the CSV from numbers. Each
+    /// [`DepthPool`] carries `spot_price_sol`, per-size [`DepthQuote`]s
+    /// (`tokens_out`, `avg_price_sol`, `price_impact_pct`), and
+    /// [`DepthToMovePrice`] (SOL to move the price 1/5/10%).
+    pub async fn depth(&self, mint: &str, params: &DepthParams) -> Result<TokenDepthResponse> {
+        self.core
+            .get(&format!("/tokens/{}/depth", mint), params)
             .await
     }
 

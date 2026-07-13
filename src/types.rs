@@ -2292,6 +2292,68 @@ pub struct RiskInputs {
     pub sniper_footprint: Option<SniperFootprint>,
 }
 
+/// v0.23 — Deployer (dev) wallet activity block on a token's risk response.
+/// Combines the create-tx dev-buy snapshot, the trade-derived dev-sell rollup
+/// (~2 min lag), and a live on-chain holdings check answering "is the dev
+/// wallet empty NOW". Every field is `None` when the underlying data is
+/// unavailable — never a guess.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RiskDev {
+    /// Deployer wallet address (base58).
+    #[serde(default)]
+    pub wallet: Option<String>,
+    /// Launchpad the token deployed on (e.g. `"pumpfun"`).
+    #[serde(default)]
+    pub launchpad: Option<String>,
+    /// Deploy timestamp (ISO 8601).
+    #[serde(default)]
+    pub deployed_at: Option<String>,
+    /// SOL the dev spent in the create-tx buy. `None` on rows pre-dating the
+    /// snapshot or on launchpads without it.
+    #[serde(default)]
+    pub buy_sol: Option<f64>,
+    /// Tokens the dev bought in the create tx (UI units).
+    #[serde(default)]
+    pub buy_tokens: Option<f64>,
+    /// Create-tx dev buy as a percent of total supply.
+    #[serde(default)]
+    pub buy_supply_pct: Option<f64>,
+    /// Tokens the dev bought AFTER the create tx (catches the
+    /// same-second-separate-tx dev buy the snapshot reads as 0).
+    #[serde(default)]
+    pub bought_tokens_after: Option<f64>,
+    /// Tokens the dev has sold (trade rollup, ~2 min lag).
+    #[serde(default)]
+    pub sold_tokens: Option<f64>,
+    /// SOL the dev received selling (trade rollup, ~2 min lag).
+    #[serde(default)]
+    pub sold_sol: Option<f64>,
+    /// First dev sell timestamp (ISO 8601).
+    #[serde(default)]
+    pub first_sell_at: Option<String>,
+    /// Most recent dev sell timestamp (ISO 8601).
+    #[serde(default)]
+    pub last_sell_at: Option<String>,
+    /// Live on-chain dev holdings of this mint (UI units). `None` = RPC
+    /// unavailable right now.
+    #[serde(default)]
+    pub holdings_tokens: Option<f64>,
+    /// `holdings_tokens` as percent of supply — pump.fun only (fixed 1B
+    /// denominator); `None` for other launchpads rather than a wrong number.
+    #[serde(default)]
+    pub holdings_supply_pct: Option<f64>,
+    /// `Some(true)` when the dev wallet holds <1 token on-chain right now.
+    /// `None` = couldn't check.
+    #[serde(default)]
+    pub wallet_empty: Option<bool>,
+    /// `Some(true)` when on-chain holdings are well below the trade-derived
+    /// expectation — tokens likely moved out without a sell. Only computed
+    /// when trade coverage exists AND the sell-rollup cursor is fresh;
+    /// otherwise `None` (unknown), never a guess.
+    #[serde(default)]
+    pub transferred_out: Option<bool>,
+}
+
 /// Transparent 0–100 token rug-risk/safety score (PRO/ULTRA). Higher = riskier.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TokenRisk {
@@ -2304,6 +2366,10 @@ pub struct TokenRisk {
     /// Raw inputs the score was derived from.
     pub inputs: RiskInputs,
     pub score_version: String,
+    /// v0.23 — deployer wallet activity ([`RiskDev`]): dev buy/sell rollup +
+    /// live on-chain holdings. `None` when the mint has no tracked deploy row.
+    #[serde(default)]
+    pub dev: Option<RiskDev>,
     pub as_of: String,
     #[serde(default, rename = "_rid")]
     pub _rid: Option<String>,
@@ -2705,6 +2771,142 @@ pub struct TokenTradesResponse {
     pub has_more: bool,
     pub filters: TokenTradesFilters,
     pub coverage: TokenTradesCoverage,
+}
+
+// ─── Token depth / price impact (/tokens/{mint}/depth, v0.23) ───────────────
+
+/// Query params for [`Token::depth`](crate::api::token::Token::depth).
+/// Unset fields are omitted from the query string.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct DepthParams {
+    /// CSV of SOL buy sizes — max 8 values, each `> 0` and `<= 10000`,
+    /// e.g. `"0.5,1,5,10"`. Server default when unset: `0.5,1,5,10`.
+    /// Prefer [`DepthParams::from_sizes`] to build this from numbers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sizes: Option<String>,
+}
+
+impl DepthParams {
+    /// Build params from numeric SOL buy sizes — joined into the CSV the API
+    /// expects (`?sizes=0.5,1,5,10`).
+    pub fn from_sizes(sizes: &[f64]) -> Self {
+        Self {
+            sizes: Some(
+                sizes
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
+        }
+    }
+}
+
+/// Slippage quote for one requested buy size against one pool.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DepthQuote {
+    /// The requested buy size, in SOL.
+    pub size_sol: f64,
+    /// Tokens received for that buy (UI units).
+    pub tokens_out: f64,
+    /// Average execution price paid, SOL per token.
+    pub avg_price_sol: f64,
+    /// Price impact vs spot, percent (rounded to 2 decimals server-side).
+    pub price_impact_pct: f64,
+}
+
+/// SOL required to move a pool's spot price up by 1% / 5% / 10%
+/// (closed-form constant-product, fee-adjusted).
+#[derive(Debug, Clone, Deserialize)]
+pub struct DepthToMovePrice {
+    #[serde(rename = "1pct")]
+    pub pct_1: f64,
+    #[serde(rename = "5pct")]
+    pub pct_5: f64,
+    #[serde(rename = "10pct")]
+    pub pct_10: f64,
+}
+
+/// Per-pool depth breakdown: spot price, slippage quotes per buy size, and
+/// how much SOL it takes to move the price 1/5/10%.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DepthPool {
+    pub pool_address: String,
+    pub dex: String,
+    pub quote_mint: String,
+    /// Pool model the depth was computed under — `"constant_product"` or `"curve"`.
+    pub pool_model: String,
+    /// Pool liquidity in USD (rounded). `None` when unknown.
+    #[serde(default)]
+    pub liquidity_usd: Option<f64>,
+    /// `true` when the pool saw a swap within the last hour.
+    pub is_active: bool,
+    /// Always `true` on entries in `pools` (unsupported pools are split into
+    /// `unsupported_pools` instead).
+    pub depth_available: bool,
+    /// Same as `pool_model` — the model the math used.
+    pub model: String,
+    /// Swap fee applied, percent (e.g. `0.25`).
+    pub fee_pct: f64,
+    /// `"stream"` (DB reserves from the firehose) or `"live_rpc"` (curve
+    /// virtual reserves read live on-chain).
+    pub source: String,
+    /// Age of the reserves snapshot in milliseconds. `0` for `live_rpc`.
+    pub reserves_age_ms: i64,
+    /// Current spot price, SOL per token.
+    pub spot_price_sol: f64,
+    /// One slippage quote per requested size, in `sizes_sol` order.
+    pub quotes: Vec<DepthQuote>,
+    pub to_move_price: DepthToMovePrice,
+}
+
+/// A pool depth could not be computed for, with the machine-readable `reason`
+/// (e.g. `"concentrated_liquidity_depth_not_supported"`, `"pool_model_unknown"`,
+/// `"curve_graduated_use_amm_pool"`, `"reserves_unavailable"`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct DepthUnsupportedPool {
+    pub pool_address: String,
+    pub dex: String,
+    pub quote_mint: String,
+    /// `None` when the pool hasn't been classified yet (`reason = "pool_model_unknown"`).
+    #[serde(default)]
+    pub pool_model: Option<String>,
+    /// Pool liquidity in USD (rounded). `None` when unknown.
+    #[serde(default)]
+    pub liquidity_usd: Option<f64>,
+    /// `true` when the pool saw a swap within the last hour.
+    pub is_active: bool,
+    /// Why depth isn't available for this pool.
+    pub reason: String,
+}
+
+/// Response of [`Token::depth`](crate::api::token::Token::depth).
+///
+/// When the mint has no tracked pools at all, `found` is `false`, `pools` and
+/// `unsupported_pools` are empty, and `sol_usd` / `primary_pool` / `note` are
+/// absent (`None`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenDepthResponse {
+    pub mint: String,
+    /// `true` when at least one pool has computable depth.
+    pub found: bool,
+    /// SOL/USD price used to convert stable-quoted pools. `None` when
+    /// unavailable (or when the mint has no pools).
+    #[serde(default)]
+    pub sol_usd: Option<f64>,
+    /// The SOL buy sizes the quotes were computed for (deduped, ascending).
+    pub sizes_sol: Vec<f64>,
+    /// Address of the deepest pool with depth available. `None` when no pool
+    /// qualified (or when the mint has no pools).
+    #[serde(default)]
+    pub primary_pool: Option<String>,
+    pub pools: Vec<DepthPool>,
+    pub unsupported_pools: Vec<DepthUnsupportedPool>,
+    /// Methodology caveat string. Absent when the mint has no pools.
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default, rename = "_rid")]
+    pub _rid: Option<String>,
 }
 
 // ─── Signal Scorecard (/signals) ────────────────────────────────────────────

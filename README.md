@@ -22,6 +22,8 @@ async, `tokio`-based, `rustls`-only.
 
 > **This is the keyed REST SDK** — authenticate with an API key (`msk_…`). It covers the full endpoint surface (KOL intelligence, deployer intel, token risk/buyer-quality/bundle, Signal Scorecard, wallet PnL, DEX firehose). Want **x402 pay-per-call** instead — no signup, your agent's wallet pays per request in USDC? Use the TypeScript [`madeonsol-x402`](https://www.npmjs.com/package/madeonsol-x402) or Python [`madeonsol-x402`](https://pypi.org/project/madeonsol-x402/) clients.
 
+> **New in 0.23.0** — **Pool depth / price impact + dev block on risk.** `client.token.depth(mint, &params)` (`GET /tokens/{mint}/depth`, PRO+) returns per-pool price-impact / slippage: for each supported pool a `DepthPool` with `spot_price_sol`, `fee_pct`, `source` (`"stream"` reserves or `"live_rpc"` curve virtual reserves), `reserves_age_ms`, per-size `DepthQuote`s (`size_sol`, `tokens_out`, `avg_price_sol`, `price_impact_pct`), and `to_move_price` (`DepthToMovePrice` — SOL to move the price 1/5/10%). Exact for constant-product AMMs and correct for pump.fun/bonk curves; concentrated pools (CLMM/Orca/DLMM), Meteora-DBC curves, and unclassified pools come back in `unsupported_pools` with a machine-readable `reason` instead of a wrong number. Pick buy sizes with `DepthParams::from_sizes(&[0.5, 1.0, 5.0, 10.0])` (`?sizes=` CSV, max 8, each ≤10000; default `0.5,1,5,10`). `client.token.risk(mint)` also gains a top-level `dev: Option<RiskDev>` block — deployer wallet activity: `buy_sol`/`buy_tokens`/`buy_supply_pct` at create, `bought_tokens_after` (catches the same-second-separate-tx dev buy), `sold_tokens`/`sold_sol`, `first_sell_at`/`last_sell_at`, live on-chain `holdings_tokens`/`holdings_supply_pct`/`wallet_empty`, and a coverage-gated `transferred_out` flag (every field `None` when unobservable — never a guess). New types: `DepthParams`, `TokenDepthResponse`, `DepthPool`, `DepthUnsupportedPool`, `DepthQuote`, `DepthToMovePrice`, `RiskDev`.
+>
 > **New in 0.22.0** — **Batch wallet classification + token trade tape + `bot_confidence` type fix.** `client.wallet.batch_classify(wallets)` (`POST /wallet/batch/classify`, PRO/ULTRA) returns reputation flags for 1–100 wallets in one call (counts as 1 request): each `WalletClassification` carries `is_sniper` / `is_bundler` / `is_dumper` / `is_kol` (+ `kol_name`), `bot_confidence`, and a `dump_cluster` cohort block. Flags are pump.fun-pipeline scoped — `false` = not observed, NOT verified clean; `is_bundler` is lifetime, `is_dumper` is a rolling 42-day window. `client.token.trades(mint, &params)` (`GET /tokens/{mint}/trades`, PRO/ULTRA) is the mint-scoped trade tape — cursor-paginated raw trades (default FULL history; capture starts 2026-04-12) with a machine-readable `coverage` honesty block. `WalletFlags` gains the same reputation flags + `dump_cluster`, and — **breaking type fix** — `WalletFlags.bot_confidence` is now `Option<String>` (text enum `"none"`/`"low"`/`"medium"`/`"high"`); it was mistyped `Option<f64>` and a server bug made it always `null` before, so no working code could have depended on the old type. `RiskInputs` gains `sniper_footprint` and `SniperDeploy` gains `footprint` — the slot-window launch-snipe rollup (`SniperFootprint`: `buys`, `buyers`, `sol`, `supply_pct`, `sniper_wallet_buys`, `data_available`, `as_of`; `None` = not observable, not zero). New types: `WalletBatchRequest`, `WalletClassification`, `WalletBatchClassifyResponse`, `WalletDumpCluster`, `TokenTradesParams`, `TokenTrade`, `TokenTradesFilters`, `TokenTradesCoverage`, `TokenTradesResponse`, `SniperFootprint`.
 >
 > **New in 0.21.0** — **Verified wallet holdings.** `client.wallet.holdings(address, &params)` (`GET /wallet/{address}/holdings`, ULTRA only) reads the wallet's actual SPL + Token-2022 token accounts and SOL balance directly from chain, enriches each with our price / MC / name / symbol data, and computes `transfer_delta` (on-chain amount minus trade-derived net position) to expose non-swap flows — airdrops, insider funding, wallet-hopping. Distinct from `client.wallet.positions()` (trade-derived FIFO): holdings is "what they actually hold right now". `WalletHoldingsResponse` carries `address`, `sol_balance`, a `Vec<Holding>` (each with `mint`, `symbol`, `name`, `amount`, `amount_raw`, `decimals`, `token_program` = `"spl"`/`"token2022"`, `price_usd`, `value_usd`, `market_cap_usd`, `is_bonded`, `trade_derived_amount`, `transfer_delta`), a `WalletHoldingsSummary` (`token_accounts`, `non_zero`, `returned`, `priced`, `total_value_usd`, `truncated`), `verified_at`, `trade_window_days`, `cache_hit`, and `ttl_seconds`. `WalletHoldingsParams` filters by `limit` (1–500, default 200) and `min_value_usd` (≥0, default 0). New types: `WalletHoldingsParams`, `WalletHoldingsResponse`, `WalletHoldingsSummary`, `Holding`.
@@ -70,7 +72,7 @@ Annual: PRO €430/yr, ULTRA €1,310/yr (2 months free). EUR is the canonical p
 
 ```toml
 [dependencies]
-madeonsol = "0.22"
+madeonsol = "0.23"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -120,7 +122,7 @@ The `MadeOnSol` client exposes namespaced sub-clients:
 | `client.kol` | KOL feed, leaderboard, coordination, PnL, trending tokens, alerts, compare, **first_touches**, **scout_leaderboard**, **coordination_history** |
 | `client.deployer` | Pump.fun deployer leaderboard, alerts, trajectory (+ daily snapshots), **history**, bonded tokens |
 | `client.alpha` | Alpha-wallet leaderboard, profiles, cap tables, buyer quality |
-| `client.token` | Per-mint snapshot, batch lookup, buyer quality, **kol_consensus**, **peak_history**, **risk**, **batch_risk**, **bundle**, **pools**, **candles**, **token_flow**, **trades** *(new 0.22 — mint-scoped trade tape)*, **almost_bonded**, directory list |
+| `client.token` | Per-mint snapshot, batch lookup, buyer quality, **kol_consensus**, **peak_history**, **risk** (+ `dev` block, 0.23), **batch_risk**, **bundle**, **pools**, **depth** *(new 0.23 — per-pool price impact)*, **candles**, **token_flow**, **trades** *(new 0.22 — mint-scoped trade tape)*, **almost_bonded**, directory list |
 | `client.wallet_tracker` | Track arbitrary Solana wallets — watchlist CRUD, swap/transfer history |
 | `client.wallet` | Universal wallet endpoints — stats + cross-product flags + derived analytics, FIFO PnL, open positions, paginated trades, **batch_classify** *(new 0.22 — bulk reputation flags, 1–100 wallets)* (PRO+), verified on-chain holdings (ULTRA) |
 | `client.coordination_alerts` | Push alerts on coordinated buying (PRO/ULTRA) |
@@ -424,6 +426,42 @@ for t in res.tokens {
     } else {
         println!("{}: risk {:?} ({:?})", t.mint, t.risk_score, t.band);
     }
+}
+# Ok(())
+# }
+```
+
+## Pool depth / price impact *(new in 0.23)*
+
+How much SOL moves the price 1/5/10%, and what slippage each buy size eats —
+per pool (PRO+). Exact for constant-product AMMs (streamed reserves, zero-RPC),
+correct for pump.fun/bonk curves via live virtual reserves. Pools we can't
+price honestly (CLMM/Orca/DLMM, Meteora-DBC) come back in `unsupported_pools`
+with a `reason` instead of a wrong number.
+
+```rust
+# async fn run(client: madeonsol::MadeOnSol) -> Result<(), Box<dyn std::error::Error>> {
+use madeonsol::types::DepthParams;
+
+let depth = client
+    .token
+    .depth(
+        "So11111111111111111111111111111111111111112",
+        &DepthParams::from_sizes(&[0.5, 1.0, 5.0, 10.0]), // or Default::default() for 0.5,1,5,10
+    )
+    .await?;
+
+for p in &depth.pools {
+    println!(
+        "{} ({}, {}): spot {} SOL — {} SOL moves price 1%",
+        p.pool_address, p.dex, p.source, p.spot_price_sol, p.to_move_price.pct_1,
+    );
+    for q in &p.quotes {
+        println!("  buy {} SOL → {} tokens ({}% impact)", q.size_sol, q.tokens_out, q.price_impact_pct);
+    }
+}
+for u in &depth.unsupported_pools {
+    println!("{}: no depth — {}", u.pool_address, u.reason);
 }
 # Ok(())
 # }
