@@ -53,7 +53,7 @@ async, `tokio`-based, `rustls`-only.
 
 ## Get an API key
 
-1. Visit **<https://madeonsol.com/developer>**
+1. Visit **<https://madeonsol.com/pricing>**
 2. Sign in with email or Solana wallet
 3. Copy your `msk_…` key (free tier is unlocked instantly — 200 req/day, 10/min)
 
