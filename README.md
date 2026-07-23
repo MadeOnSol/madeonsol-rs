@@ -18,7 +18,7 @@ async, `tokio`-based, `rustls`-only.
 >
 > **Free tier: 200 requests/day at <https://madeonsol.com/pricing> — no credit card required.**
 >
-> New customers get a 5-day free trial of Pro or Ultra when you pay by card — full access, nothing charged during the trial, cancel anytime. Start at <https://madeonsol.com/pricing>
+> New customers get a 3-day free trial of Pro or Ultra when you pay by card — full access, nothing charged during the trial, cancel anytime. Start at <https://madeonsol.com/pricing>
 
 > **This is the keyed REST SDK** — authenticate with an API key (`msk_…`). It covers the full endpoint surface (KOL intelligence, deployer intel, token risk/buyer-quality/bundle, Signal Scorecard, wallet PnL, DEX firehose). Want **x402 pay-per-call** instead — no signup, your agent's wallet pays per request in USDC? Use the TypeScript [`madeonsol-x402`](https://www.npmjs.com/package/madeonsol-x402) or Python [`madeonsol-x402`](https://pypi.org/project/madeonsol-x402/) clients.
 
