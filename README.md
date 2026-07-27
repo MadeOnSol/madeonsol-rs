@@ -16,7 +16,7 @@ async, `tokio`-based, `rustls`-only.
 > signals, push every pump.fun graduation the second it bonds, verify any wallet's
 > current on-chain holdings, and stream every DEX trade across 9+ programs.
 >
-> **Free tier: 200 requests/day at <https://madeonsol.com/pricing> — no credit card required.**
+> **Free tier: 200 requests/day, every endpoint — no signup payment. Get a key at <https://madeonsol.com/pricing>.**
 >
 > **This is the keyed REST SDK** — authenticate with an API key (`msk_…`). It covers the full endpoint surface (KOL intelligence, deployer intel, token risk/buyer-quality/bundle, Signal Scorecard, wallet PnL, DEX firehose). Want **x402 pay-per-call** instead — no signup, your agent's wallet pays per request in USDC? Use the TypeScript [`madeonsol-x402`](https://www.npmjs.com/package/madeonsol-x402) or Python [`madeonsol-x402`](https://pypi.org/project/madeonsol-x402/) clients.
 
@@ -63,8 +63,9 @@ webhooks, and the all-DEX firehose:
 | **Free** | $0 | 200 | — | — | — | — |
 | **PRO** | €43/mo ≈ $49 | 10,000 | ✅ | ✅ | 3 | — |
 | **ULTRA** | €131/mo ≈ $149 | 100,000 | ✅ | ✅ | 10 | ✅ |
+| **BUSINESS** | €400/mo ≈ $449 | 500,000 | ✅ | ✅ | 30 | ✅ |
 
-Annual: PRO €430/yr, ULTRA €1,310/yr (2 months free). EUR is the canonical price; USD shown for reference.
+Annual: PRO €430/yr, ULTRA €1,310/yr, BUSINESS €4,000/yr (2 months free). EUR is the canonical price; USD shown for reference.
 
 ## Install
 
