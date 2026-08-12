@@ -2052,6 +2052,9 @@ pub struct AlphaCapTableResponse {
     pub mint: String,
     pub buyers: Vec<AlphaCapTableBuyer>,
     pub summary: AlphaCapTableSummary,
+    /// v0.23.4 — trade-coverage disclosure (`None` on older cached responses).
+    #[serde(default)]
+    pub coverage: Option<TokenTradesCoverage>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2102,6 +2105,9 @@ pub struct AlphaBuyerQualityResponse {
     pub breakdown: Option<AlphaBuyerQualityBreakdown>,
     #[serde(default)]
     pub note: Option<String>,
+    /// v0.23.4 — trade-coverage disclosure (`None` on older cached responses).
+    #[serde(default)]
+    pub coverage: Option<TokenTradesCoverage>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2370,6 +2376,11 @@ pub struct TokenRisk {
     /// live on-chain holdings. `None` when the mint has no tracked deploy row.
     #[serde(default)]
     pub dev: Option<RiskDev>,
+    /// v0.23.4 — trade-coverage disclosure (single-mint `/risk` only). Its
+    /// `note` names the split: trade-derived sub-fields are launchpad-pipeline
+    /// scoped, on-chain sub-fields are unaffected by trade coverage.
+    #[serde(default)]
+    pub coverage: Option<TokenTradesCoverage>,
     pub as_of: String,
     #[serde(default, rename = "_rid")]
     pub _rid: Option<String>,
@@ -2521,6 +2532,9 @@ pub struct TokenBundle {
     /// Per-wallet breakdown of the cohort. Empty on lower tiers.
     #[serde(default)]
     pub wallets: Vec<BundleWallet>,
+    /// v0.23.4 — trade-coverage disclosure (`None` on older cached responses).
+    #[serde(default)]
+    pub coverage: Option<TokenTradesCoverage>,
     #[serde(default, rename = "_rid")]
     pub _rid: Option<String>,
 }
@@ -2692,6 +2706,10 @@ pub struct TokenFlowResponse {
     /// Net SOL flow — `buy_sol` minus `sell_sol`.
     pub net_sol: f64,
     pub trades_per_wallet: f64,
+    /// v0.23.4 — trade-coverage disclosure; when `in_scope` is `false` the
+    /// zero counts mean "not covered", not "no activity".
+    #[serde(default)]
+    pub coverage: Option<TokenTradesCoverage>,
 }
 
 // ─── Token trade tape (/tokens/{mint}/trades, v0.22) ────────────────────────
@@ -2754,13 +2772,32 @@ pub struct TokenTradesFilters {
 }
 
 /// Coverage honesty block: where the tape starts and what pipeline feeds it.
+///
+/// v0.23.4 — also returned (as an optional `coverage` field) on bundle, risk,
+/// flow, cap-table, buyer-quality and the wallet
+/// stats/pnl/positions/holdings/trades endpoints, with the new `in_scope`
+/// probe.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TokenTradesCoverage {
     /// Unix epoch seconds — capture starts 2026-04-12.
     pub history_start: i64,
     /// e.g. `"pump.fun pipeline"` — trades outside that pipeline aren't on the tape.
     pub scope: String,
+    /// v0.23.4 — `Some(true)` = persisted trades exist for this mint/wallet ·
+    /// `Some(false)` = the subject sits outside the launchpad write-gate (read
+    /// zeros as "not covered", NOT "no activity") · `None` = probe unavailable
+    /// or an older cached response.
+    #[serde(default)]
+    pub in_scope: Option<bool>,
+    /// Present when `in_scope` is `false`/`null` (and always on `/risk`) —
+    /// human-readable explanation of what the coverage gap means.
+    #[serde(default)]
+    pub note: Option<String>,
 }
+
+/// Preferred name for the coverage honesty block — it is no longer
+/// trades-specific (see [`TokenTradesCoverage`]).
+pub type TradeCoverage = TokenTradesCoverage;
 
 /// Response of [`Token::trades`](crate::api::token::Token::trades).
 #[derive(Debug, Clone, Deserialize)]
@@ -3334,6 +3371,11 @@ pub struct WalletFlags {
     /// wallet has no dump-cluster record.
     #[serde(default)]
     pub dump_cluster: Option<WalletDumpCluster>,
+    /// v0.23.4 — semantics reminder carried in-band: `is_sniper` /
+    /// `is_bundler` / `is_dumper` are launchpad-pipeline scoped, so `false`
+    /// means "not observed in covered trades", not "verified clean".
+    #[serde(default)]
+    pub coverage_note: Option<String>,
 }
 
 // v1.8.1 enrichments — additive, all Option<...> so old SDK builds keep
@@ -3475,6 +3517,10 @@ pub struct WalletStatsResponse {
     /// Derived analytics: win rate, ROI, best/worst trade, biggest miss, verdict (v1.9+).
     #[serde(default)]
     pub derived: Option<WalletDerivedStats>,
+    /// v0.23.4 — trade-coverage disclosure; when `in_scope` is `false` an
+    /// empty `stats` block means "outside the write-gate", not "never traded".
+    #[serde(default)]
+    pub coverage: Option<TokenTradesCoverage>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -3576,6 +3622,10 @@ pub struct WalletPnlResponse {
     /// Only present on cache misses.
     #[serde(default)]
     pub ttl_seconds: Option<u64>,
+    /// v0.23.4 — trade-coverage disclosure; `in_scope: Some(false)` means the
+    /// PnL is built from zero covered trades, not that the wallet never traded.
+    #[serde(default)]
+    pub coverage: Option<TokenTradesCoverage>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -3588,6 +3638,9 @@ pub struct WalletPositionsResponse {
     pub computed_at: Option<String>,
     #[serde(default)]
     pub ttl_seconds: Option<u64>,
+    /// v0.23.4 — trade-coverage disclosure (`None` on older cached responses).
+    #[serde(default)]
+    pub coverage: Option<TokenTradesCoverage>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -3643,6 +3696,10 @@ pub struct WalletTradesResponse {
     pub next_cursor: Option<String>,
     pub has_more: bool,
     pub filters: WalletTradesFilters,
+    /// v0.23.4 — trade-coverage disclosure; an empty tape with `in_scope:
+    /// Some(false)` means "outside the write-gate", not "never traded".
+    #[serde(default)]
+    pub coverage: Option<TokenTradesCoverage>,
 }
 
 // ─── Wallet batch classify (/wallet/batch/classify, v0.22) ──────────────────
@@ -3744,6 +3801,11 @@ pub struct WalletHoldingsResponse {
     pub cache_hit: Option<bool>,
     #[serde(default)]
     pub ttl_seconds: Option<u64>,
+    /// v0.23.4 — trade-coverage disclosure for the trade-derived enrichments
+    /// (`transfer_delta`, cost-basis fields); the holdings themselves are live
+    /// on-chain reads and unaffected.
+    #[serde(default)]
+    pub coverage: Option<TokenTradesCoverage>,
 }
 
 // ─── Tools ──────────────────────────────────────────────────────────────────
