@@ -45,12 +45,27 @@ function walk(dir) {
 }
 
 const STR = /"([^"]*)"|`([^`]*)`/g;
+/**
+ * Is this line a Rust doc/ordinary comment (`///`, `//!`, `//`) or a block-comment
+ * body line?
+ *
+ * Without this the extractor reads rustdoc prose as code and flags backtick code
+ * spans like `/risk` as SDK paths — two such false positives on this crate made
+ * the gate permanently red, which is worse than not having a gate at all. Only
+ * whole comment LINES are skipped, so a real path literal with a trailing `//`
+ * comment on the same line is still checked.
+ */
+function isCommentLine(line) {
+  return /^\s*(\/\/|\*|\/\*)/.test(line);
+}
+
 const problems = [];
 let count = 0;
 for (const file of walk(SRC)) {
   readFileSync(file, "utf8")
     .split("\n")
     .forEach((line, i) => {
+      if (isCommentLine(line)) return;
       for (const m of line.matchAll(STR)) {
         const raw = m[1] ?? m[2] ?? "";
         let c = raw.replace(/^\/api\/(?:v1|x402)/, ""); // strip prefix; x402 rewrites to v1
