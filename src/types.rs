@@ -2746,10 +2746,28 @@ pub struct TokenTrade {
     pub action: String,
     pub sol_amount: f64,
     pub token_amount: f64,
+    /// THIS TRADE's executed price: `sol_amount / token_amount`, so it reconciles
+    /// exactly with the amounts on the same row and with the PnL endpoints.
+    /// `sol_amount` is the wallet's net SOL movement, so this is the trader's
+    /// all-in effective rate — swap fee and any account rent included, not the
+    /// pool mid. `None` for dust and zero-SOL legs.
+    ///
+    /// Changed 2026-08-16: previously the canonical pool price, which disagreed
+    /// with the row's own amounts by a 7.9% median. That value moved to
+    /// [`TokenTrade::market_price_sol`].
     #[serde(default)]
     pub price_sol: Option<f64>,
+    /// [`TokenTrade::price_sol`] in USD.
     #[serde(default)]
     pub price_usd: Option<f64>,
+    /// Canonical pool price sampled near this trade's slot — one value per token
+    /// per update, so every trade in the same slot shares it. Use for a per-token
+    /// series; use `price_sol` for cost basis and PnL.
+    #[serde(default)]
+    pub market_price_sol: Option<f64>,
+    /// [`TokenTrade::market_price_sol`] in USD.
+    #[serde(default)]
+    pub market_price_usd: Option<f64>,
     #[serde(default)]
     pub early_buyer_rank: Option<i64>,
     #[serde(default)]
@@ -3677,6 +3695,20 @@ pub struct WalletTrade {
     pub action: String,
     pub sol_amount: f64,
     pub token_amount: f64,
+    /// This trade's executed price — `sol_amount / token_amount`. Added
+    /// 2026-08-16; this route returned amounts and no price before. Same
+    /// definition as [`TokenTrade::price_sol`].
+    #[serde(default)]
+    pub price_sol: Option<f64>,
+    /// [`WalletTrade::price_sol`] in USD.
+    #[serde(default)]
+    pub price_usd: Option<f64>,
+    /// Canonical pool price near this trade's slot — NOT this trade's price.
+    #[serde(default)]
+    pub market_price_sol: Option<f64>,
+    /// [`WalletTrade::market_price_sol`] in USD.
+    #[serde(default)]
+    pub market_price_usd: Option<f64>,
     pub block_time: i64,
     pub traded_at: String,
 }
