@@ -175,6 +175,131 @@ impl Token {
             .await
     }
 
+    /// v0.26 — Token locks & vesting on a mint (`GET /tokens/{mint}/locks`,
+    /// PRO+): every on-chain Streamflow stream, Jupiter Lock `VestingEscrow`
+    /// and Bonfida token-vesting contract, decoded from the locker programs'
+    /// account state — *did the team lock, how much, until when, and can they
+    /// pull it*.
+    ///
+    /// Each [`TokenLock`] carries the schedule (`start_at` / `cliff_at` /
+    /// `end_at` / `period_seconds`, `cliff_amount_raw`, `amount_per_period_raw`),
+    /// the terms (`cancelable_by_sender` — funds are locked against the
+    /// recipient, not the locker, so a cancelable lock is a weaker promise —
+    /// `cancelable_by_recipient`, `transferable`, `can_topup`) and a
+    /// live-derived view computed at request time: `locked_raw` (still locked
+    /// now), `unlocked_raw`, `withdrawn_raw`, `claimable_raw`, [`LockStatus`]
+    /// and `next_unlock`. [`TokenLocksSummary`] rolls up the exact
+    /// `lock_count`, `distinct_lockers`, locked / deposited totals (raw + ui +
+    /// usd + % of supply), the `unlocking_7d_*` / `unlocking_30d_*` forward
+    /// schedule, the nearest `next_unlock` and `active_cancelable_by_sender`.
+    ///
+    /// Every `*_raw` amount is base units as a **`String`** — never a float;
+    /// the ui / `*_usd` / `*_pct_of_supply` companions are `None` when
+    /// decimals or price are unknown (`token.facts_resolved`). Use
+    /// [`TokenLocksParams`] to filter the list by [`LockStatus`] /
+    /// [`LockProgram`] (the summary always covers all rows) and cap `limit`
+    /// (1–500, default 200). **LP locks are NOT included** — token / vesting
+    /// locks only. Keyed API only (not on the x402 rail); BASIC gets 403.
+    pub async fn locks(
+        &self,
+        mint: &str,
+        params: &TokenLocksParams,
+    ) -> Result<TokenLocksResponse> {
+        self.core
+            .get(&format!("/tokens/{}/locks", mint), params)
+            .await
+    }
+
+    /// v0.26 — Cross-token feed of NEW lock / vesting contracts
+    /// (`GET /tokens/locks`, PRO+), newest first — who just locked tokens, of
+    /// what mint, how much, until when. Same [`TokenLock`] rows as
+    /// [`Token::locks`] plus a per-row [`TokenLock::token`] block (symbol,
+    /// decimals, price, market cap).
+    ///
+    /// Poll forward by passing `pagination.next_since` back as
+    /// [`TokenLocksFeedParams::since`], page back with `next_before` →
+    /// `before`, or subscribe to the **`token:locks`** WebSocket channel
+    /// (event `token:lock`, payload [`TokenLockEvent`]) — the response carries
+    /// a [`StreamPointer`]. `status` / `min_usd` / `min_pct_of_supply`
+    /// post-filter with a ×4 over-fetch, so a page may be shorter than
+    /// `limit`. Backfilled Jupiter Lock rows have no on-chain creation time
+    /// (`created_at_estimated`) and are excluded unless
+    /// `include_estimated: Some(true)`. LP locks are not included. Keyed API only.
+    pub async fn locks_feed(
+        &self,
+        params: &TokenLocksFeedParams,
+    ) -> Result<TokenLocksFeedResponse> {
+        self.core.get("/tokens/locks", params).await
+    }
+
+    /// v0.26 — Upcoming unlock EVENTS across all active lock / vesting
+    /// contracts inside a window (`GET /tokens/unlocks`, PRO+) — which locked
+    /// supply hits the market this week, how much, from whose lock.
+    ///
+    /// One [`TokenUnlock`] per active contract = its NEXT unlock event in the
+    /// window ([`UnlockEventKind`]: cliff / period / final / tranche) with
+    /// `unlock_at`, `in_seconds`, `amount_*`, plus `window_amount_*` = that
+    /// contract's total release over the whole window, the token block and
+    /// the [`UnlockLockRef`] it belongs to. Continuous per-second streams
+    /// (Streamflow payroll) contribute only their cliff / final events.
+    /// [`TokenUnlocksParams`]: [`UnlockWindow`] (`1h` … `90d`, default `7d`),
+    /// `mint` / `program` / `kind` / `min_usd` / `min_pct_of_supply`,
+    /// [`UnlocksSort`] (`soonest` default, `largest_usd`, `largest_pct`),
+    /// `limit` 1–200. Base-unit amounts are `String`s; ui / usd / pct `None`
+    /// when unknown. LP locks not included. Keyed API only.
+    pub async fn unlocks(&self, params: &TokenUnlocksParams) -> Result<TokenUnlocksResponse> {
+        self.core.get("/tokens/unlocks", params).await
+    }
+
+    /// v0.26 — pump.fun creator-fee sharing on a mint
+    /// (`GET /tokens/{mint}/fee-shares`, PRO+): who receives what share of
+    /// the coin's creator fees.
+    ///
+    /// [`TokenFeeSharesResponse::config`] is the on-chain `SharingConfig`
+    /// ([`FeeSharingConfig`]): `admin`, `status`, `is_default` (`Some(true)`
+    /// = 100% to the creator — a real answer, not a miss), `redirected_bps`
+    /// (share going to non-admin addresses), `social_bps`, and each
+    /// [`FeeShareholder`]'s `share_bps`, `is_admin`, `is_social_pda` (fees
+    /// earmarked for a platform identity — [`FeeShareSocial::platform`] 2 = X,
+    /// `user_id` is the platform-native numeric id, not the handle) and what
+    /// it has `received`. `config.source` is [`FeeConfigSource::Stream`] (our
+    /// table — only non-default splits are stored) or `Chain` (live PDA read;
+    /// `config` is `None` and `config_error` set only when every RPC endpoint
+    /// failed). [`FeeDistributions`] rolls up every `distribute_creator_fees`
+    /// payout (per-recipient received, `past_recipients` no longer in the
+    /// split); `history` is the config change log and `recent_distributions`
+    /// the latest payouts. Amounts are quote base units as `String`s (SOL
+    /// lamports unless a stable-quoted coin); ui / usd may be `None`.
+    /// **Event history starts 2026-08-17.** Keyed API only.
+    pub async fn fee_shares(&self, mint: &str) -> Result<TokenFeeSharesResponse> {
+        self.core
+            .get(&format!("/tokens/{}/fee-shares", mint), &())
+            .await
+    }
+
+    /// v0.26 — pump.fun fee-event feed (`GET /tokens/fee-claims`, PRO+),
+    /// newest first: [`FeeEventType::Distribution`] (creator fees paid
+    /// pro-rata to the SharingConfig shareholders, with `payouts` per address),
+    /// `SocialClaim` (fees earmarked for a platform identity — platform 2 = X
+    /// — claimed to a `recipient` wallet), `SharesCreated` / `SharesUpdated` /
+    /// `SharesReset`, `CreatorTransferred`, and `CreatorClaim` (the plain
+    /// creator vault claim — per creator, no `mint`; EXCLUDED unless requested
+    /// via [`TokenFeeClaimsParams::event_type`]).
+    ///
+    /// Default 100%-to-creator configs and zero-amount distributions are not
+    /// stored. Poll forward with `pagination.next_since` → `since`, or
+    /// subscribe to the **`token:fee_claims`** WebSocket channel (event
+    /// `token:fee_claim`, payload [`TokenFeeClaimEvent`] — the writer's raw
+    /// row, not this enriched shape). `amount_raw` is quote base units as a
+    /// `String`; `amount` / `amount_usd` may be `None`. **History starts
+    /// 2026-08-17.** Keyed API only.
+    pub async fn fee_claims(
+        &self,
+        params: &TokenFeeClaimsParams,
+    ) -> Result<TokenFeeClaimsResponse> {
+        self.core.get("/tokens/fee-claims", params).await
+    }
+
     /// v0.15 — 1-minute OHLC candles for a token, aggregated from the trade
     /// firehose. Returns open/high/low/close, USD volume, trade count, and
     /// market cap per bar. ULTRA unlocks buy/sell volume split, net flow,

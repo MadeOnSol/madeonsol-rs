@@ -2823,6 +2823,995 @@ pub struct TokenHoldersResponse {
     pub source: TokenHoldersSource,
 }
 
+// ─── Token locks & vesting (/tokens/{mint}/locks, /tokens/locks, /tokens/unlocks) — v0.26 ───
+
+/// Locker program a lock / vesting contract lives in. `Other` catches
+/// programs added after this crate shipped.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LockProgram {
+    Streamflow,
+    JupiterLock,
+    BonfidaVesting,
+    #[serde(other)]
+    Other,
+}
+
+impl LockProgram {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Streamflow => "streamflow",
+            Self::JupiterLock => "jupiter_lock",
+            Self::BonfidaVesting => "bonfida_vesting",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// `Lock` = the whole amount unlocks at one date; `Vesting` = cliff and/or
+/// periodic release (Streamflow's own lock-vs-vesting rule is mirrored).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LockKind {
+    Lock,
+    Vesting,
+    #[serde(other)]
+    Other,
+}
+
+/// Contract status, derived at request time from the schedule and the
+/// on-chain withdrawn / cancelled / closed state.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LockStatus {
+    Active,
+    Completed,
+    Cancelled,
+    Closed,
+    #[serde(other)]
+    Other,
+}
+
+/// Kind of unlock event: `Cliff` (cliff amount released), `Period` (one
+/// periodic release, period ≥ 1h), `Final` (last release / end of schedule),
+/// `Tranche` (Bonfida schedule tranche).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UnlockEventKind {
+    Cliff,
+    Period,
+    Final,
+    Tranche,
+    #[serde(other)]
+    Other,
+}
+
+/// Window for [`Token::unlocks`](crate::api::token::Token::unlocks)
+/// (`within=`). Defaults to `7d` server-side when unset.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum UnlockWindow {
+    #[serde(rename = "1h")]
+    H1,
+    #[serde(rename = "6h")]
+    H6,
+    #[serde(rename = "24h")]
+    H24,
+    #[serde(rename = "3d")]
+    D3,
+    #[default]
+    #[serde(rename = "7d")]
+    D7,
+    #[serde(rename = "14d")]
+    D14,
+    #[serde(rename = "30d")]
+    D30,
+    #[serde(rename = "90d")]
+    D90,
+}
+
+impl UnlockWindow {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::H1 => "1h",
+            Self::H6 => "6h",
+            Self::H24 => "24h",
+            Self::D3 => "3d",
+            Self::D7 => "7d",
+            Self::D14 => "14d",
+            Self::D30 => "30d",
+            Self::D90 => "90d",
+        }
+    }
+}
+
+/// Sort order for [`Token::unlocks`](crate::api::token::Token::unlocks).
+/// Defaults to [`UnlocksSort::Soonest`] server-side when unset.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum UnlocksSort {
+    #[default]
+    Soonest,
+    LargestUsd,
+    LargestPct,
+}
+
+impl UnlocksSort {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Soonest => "soonest",
+            Self::LargestUsd => "largest_usd",
+            Self::LargestPct => "largest_pct",
+        }
+    }
+}
+
+/// Mint facts + price attached to lock responses. `decimals` / `supply` come
+/// from the SPL Mint account (most locked tokens are outside the pump/DEX
+/// universe), `price_usd` / `market_cap_usd` from MadeOnSol price data — all
+/// `None` when unknown. `facts_resolved` (per-mint response only) is `false`
+/// while decimals/supply are still unresolved, in which case every ui / usd /
+/// pct field on the rows is `None`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LockTokenInfo {
+    #[serde(default)]
+    pub symbol: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub decimals: Option<i64>,
+    #[serde(default)]
+    pub price_usd: Option<f64>,
+    /// UI-scaled total supply (per-mint response only).
+    #[serde(default)]
+    pub supply: Option<f64>,
+    #[serde(default)]
+    pub market_cap_usd: Option<f64>,
+    /// Per-mint response only; absent (`false`) on feed / unlock rows.
+    #[serde(default)]
+    pub facts_resolved: bool,
+}
+
+/// The next unlock event of a contract (or, in
+/// [`TokenLocksSummary::next_unlock`], the nearest one across all contracts —
+/// then `lock_account` names it).
+#[derive(Debug, Clone, Deserialize)]
+pub struct LockNextUnlock {
+    /// ISO 8601.
+    pub at: String,
+    pub kind: UnlockEventKind,
+    /// Base units as a decimal STRING — never a float.
+    pub amount_raw: String,
+    #[serde(default)]
+    pub amount: Option<f64>,
+    #[serde(default)]
+    pub amount_usd: Option<f64>,
+    /// Only on the summary-level `next_unlock`.
+    #[serde(default)]
+    pub lock_account: Option<String>,
+}
+
+/// One on-chain lock / vesting contract with a live-derived view. Every
+/// `*_raw` field is base units as a decimal STRING; the ui (`amount`,
+/// `locked`, …), `*_usd` and `*_pct_of_supply` companions are `None` when
+/// decimals or price are unknown.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenLock {
+    /// The contract account (Streamflow stream / Jupiter `VestingEscrow` /
+    /// Bonfida vesting account).
+    pub lock_account: String,
+    pub program: LockProgram,
+    pub kind: LockKind,
+    /// Derived at request time.
+    pub status: LockStatus,
+    pub mint: String,
+    /// Creator / locker (Bonfida has none on-chain).
+    #[serde(default)]
+    pub sender: Option<String>,
+    #[serde(default)]
+    pub recipient: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Deposited amount, base units.
+    pub amount_raw: String,
+    #[serde(default)]
+    pub amount: Option<f64>,
+    #[serde(default)]
+    pub amount_usd: Option<f64>,
+    #[serde(default)]
+    pub amount_pct_of_supply: Option<f64>,
+    /// Still locked right now (amount − unlocked-so-far); `"0"` unless active.
+    pub locked_raw: String,
+    #[serde(default)]
+    pub locked: Option<f64>,
+    #[serde(default)]
+    pub locked_usd: Option<f64>,
+    #[serde(default)]
+    pub locked_pct_of_supply: Option<f64>,
+    pub unlocked_raw: String,
+    #[serde(default)]
+    pub unlocked: Option<f64>,
+    /// Claimed so far.
+    pub withdrawn_raw: String,
+    #[serde(default)]
+    pub withdrawn: Option<f64>,
+    /// Unlocked but not yet withdrawn.
+    pub claimable_raw: String,
+    #[serde(default)]
+    pub claimable: Option<f64>,
+    #[serde(default)]
+    pub start_at: Option<String>,
+    #[serde(default)]
+    pub cliff_at: Option<String>,
+    /// Fully unlocked at; `None` = perpetual / no schedule.
+    #[serde(default)]
+    pub end_at: Option<String>,
+    #[serde(default)]
+    pub period_seconds: Option<i64>,
+    /// `true` when period < 1h (per-second stream).
+    #[serde(default)]
+    pub continuous: bool,
+    #[serde(default)]
+    pub amount_per_period_raw: Option<String>,
+    #[serde(default)]
+    pub amount_per_period: Option<f64>,
+    #[serde(default)]
+    pub cliff_amount_raw: Option<String>,
+    #[serde(default)]
+    pub cliff_amount: Option<f64>,
+    #[serde(default)]
+    pub perpetual: bool,
+    #[serde(default)]
+    pub next_unlock: Option<LockNextUnlock>,
+    /// The locker can cancel — funds are locked against the recipient, not
+    /// the locker. A cancelable lock is a weaker promise.
+    #[serde(default)]
+    pub cancelable_by_sender: Option<bool>,
+    #[serde(default)]
+    pub cancelable_by_recipient: Option<bool>,
+    #[serde(default)]
+    pub transferable: Option<bool>,
+    #[serde(default)]
+    pub can_topup: Option<bool>,
+    #[serde(default)]
+    pub cancelled_at: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    /// Backfilled row with no on-chain creation time (Jupiter Lock).
+    #[serde(default)]
+    pub created_at_estimated: bool,
+    #[serde(default)]
+    pub tx_signature: Option<String>,
+    /// Per-row token block — present on [`TokenLocksFeedResponse`] rows only
+    /// (the per-mint response carries one [`TokenLocksResponse::token`]).
+    #[serde(default)]
+    pub token: Option<LockTokenInfo>,
+}
+
+/// Roll-up over every contract on the mint (the `status` / `program` filters
+/// narrow the `locks` list, never the summary).
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenLocksSummary {
+    /// Exact count of contracts on the mint.
+    pub lock_count: i64,
+    /// `false` when the mint holds more than 5000 contracts — totals then
+    /// cover the newest 5000 (`rows_considered`).
+    #[serde(default = "default_true")]
+    pub complete: bool,
+    #[serde(default)]
+    pub rows_considered: i64,
+    #[serde(default)]
+    pub active_count: i64,
+    #[serde(default)]
+    pub by_program: HashMap<String, i64>,
+    #[serde(default)]
+    pub by_kind: HashMap<String, i64>,
+    #[serde(default)]
+    pub distinct_lockers: i64,
+    /// Base units as a decimal STRING.
+    pub locked_raw: String,
+    #[serde(default)]
+    pub locked: Option<f64>,
+    #[serde(default)]
+    pub locked_usd: Option<f64>,
+    #[serde(default)]
+    pub locked_pct_of_supply: Option<f64>,
+    pub deposited_raw: String,
+    #[serde(default)]
+    pub deposited: Option<f64>,
+    #[serde(default)]
+    pub deposited_usd: Option<f64>,
+    /// Forward unlock schedule — total releasing in the next 7 days.
+    pub unlocking_7d_raw: String,
+    #[serde(default)]
+    pub unlocking_7d: Option<f64>,
+    #[serde(default)]
+    pub unlocking_7d_usd: Option<f64>,
+    #[serde(default)]
+    pub unlocking_7d_pct_of_supply: Option<f64>,
+    /// Forward unlock schedule — total releasing in the next 30 days.
+    pub unlocking_30d_raw: String,
+    #[serde(default)]
+    pub unlocking_30d: Option<f64>,
+    #[serde(default)]
+    pub unlocking_30d_usd: Option<f64>,
+    #[serde(default)]
+    pub unlocking_30d_pct_of_supply: Option<f64>,
+    /// Nearest next unlock across all active contracts (`lock_account` set).
+    #[serde(default)]
+    pub next_unlock: Option<LockNextUnlock>,
+    /// Active contracts the sender can still cancel.
+    #[serde(default)]
+    pub active_cancelable_by_sender: i64,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// `GET /tokens/{mint}/locks` — every lock / vesting contract on a mint
+/// (Streamflow, Jupiter Lock, Bonfida vesting) + summary. **LP locks are not
+/// included.**
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenLocksResponse {
+    pub mint: String,
+    pub token: LockTokenInfo,
+    pub summary: TokenLocksSummary,
+    #[serde(default)]
+    pub locks: Vec<TokenLock>,
+    #[serde(default)]
+    pub meta: Option<serde_json::Value>,
+}
+
+/// Query params for [`Token::locks`](crate::api::token::Token::locks).
+/// Unset fields are omitted from the query string.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TokenLocksParams {
+    /// Filter the list (the summary always covers all rows).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<LockStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub program: Option<LockProgram>,
+    /// 1–500; default 200.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// Query params for [`Token::locks_feed`](crate::api::token::Token::locks_feed).
+/// Unset fields are omitted from the query string.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TokenLocksFeedParams {
+    /// ISO 8601 — only contracts created after this instant (use
+    /// `pagination.next_since` to poll forward).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    /// ISO 8601 — page back: only contracts created before this instant
+    /// (use `pagination.next_before`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mint: Option<String>,
+    /// Creator / locker wallet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipient: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub program: Option<LockProgram>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<LockKind>,
+    /// Post-filter (×4 over-fetch).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<LockStatus>,
+    /// Deposited amount ≥ USD (needs a known price). Post-filter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_usd: Option<f64>,
+    /// Deposited amount ≥ this % of supply, 0–100. Post-filter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_pct_of_supply: Option<f64>,
+    /// Include backfilled Jupiter Lock rows that have no on-chain creation
+    /// time (`created_at_estimated`); excluded by default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_estimated: Option<bool>,
+    /// 1–100; default 50.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// Time-cursor pagination shared by the lock feed and the fee-claim feed:
+/// pass `next_since` back as `since` to poll forward, `next_before` as
+/// `before` to page back.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TimeCursorPagination {
+    pub limit: u32,
+    pub count: u32,
+    pub has_more: bool,
+    #[serde(default)]
+    pub next_since: Option<String>,
+    #[serde(default)]
+    pub next_before: Option<String>,
+}
+
+/// WebSocket pointer attached to feed responses that are also pushed live —
+/// `channel` is what to put in the subscribe frame (`token:locks`,
+/// `token:fee_claims`), `url` the stream endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamPointer {
+    pub channel: String,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub token_endpoint: Option<String>,
+    #[serde(default)]
+    pub subscribe: Option<serde_json::Value>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// `GET /tokens/locks` — cross-token feed of NEW lock / vesting contracts,
+/// newest first. Same rows as [`TokenLocksResponse::locks`] plus a per-row
+/// [`TokenLock::token`] block. Pushed live as `token:lock` on the
+/// `token:locks` channel ([`TokenLockEvent`]).
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenLocksFeedResponse {
+    #[serde(default)]
+    pub locks: Vec<TokenLock>,
+    pub pagination: TimeCursorPagination,
+    #[serde(default)]
+    pub stream: Option<StreamPointer>,
+    #[serde(default)]
+    pub meta: Option<serde_json::Value>,
+}
+
+/// Query params for [`Token::unlocks`](crate::api::token::Token::unlocks).
+/// Unset fields are omitted from the query string.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TokenUnlocksParams {
+    /// Window; default `7d`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub within: Option<UnlockWindow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub program: Option<LockProgram>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<LockKind>,
+    /// Next-event amount ≥ USD (needs a known price).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_usd: Option<f64>,
+    /// Next-event amount ≥ this % of supply, 0–100.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_pct_of_supply: Option<f64>,
+    /// Default `soonest`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort: Option<UnlocksSort>,
+    /// 1–200; default 50.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// The `[from, to]` window an unlock query covered.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UnlockWindowInfo {
+    /// Echo of `within` (`"7d"` …).
+    pub within: String,
+    pub from: String,
+    pub to: String,
+}
+
+/// The contract an unlock event belongs to — a subset of a [`TokenLock`] row.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UnlockLockRef {
+    pub lock_account: String,
+    pub program: LockProgram,
+    pub kind: LockKind,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub sender: Option<String>,
+    #[serde(default)]
+    pub recipient: Option<String>,
+    /// Deposited amount, base units as a decimal STRING.
+    pub amount_raw: String,
+    #[serde(default)]
+    pub amount: Option<f64>,
+    #[serde(default)]
+    pub amount_usd: Option<f64>,
+    /// Still locked right now, base units.
+    pub locked_raw: String,
+    #[serde(default)]
+    pub locked: Option<f64>,
+    #[serde(default)]
+    pub locked_usd: Option<f64>,
+    #[serde(default)]
+    pub cliff_at: Option<String>,
+    #[serde(default)]
+    pub end_at: Option<String>,
+    #[serde(default)]
+    pub period_seconds: Option<i64>,
+    #[serde(default)]
+    pub continuous: bool,
+    #[serde(default)]
+    pub cancelable_by_sender: Option<bool>,
+}
+
+/// One upcoming unlock event: an active contract's NEXT release inside the
+/// window (`amount_*`) plus that contract's total release over the whole
+/// window (`window_amount_*`). Base units are decimal STRINGS; ui / usd /
+/// pct are `None` when decimals or price are unknown.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenUnlock {
+    /// ISO 8601.
+    pub unlock_at: String,
+    /// Seconds from the request instant until `unlock_at`.
+    pub in_seconds: i64,
+    pub event: UnlockEventKind,
+    pub amount_raw: String,
+    #[serde(default)]
+    pub amount: Option<f64>,
+    #[serde(default)]
+    pub amount_usd: Option<f64>,
+    #[serde(default)]
+    pub amount_pct_of_supply: Option<f64>,
+    pub window_amount_raw: String,
+    #[serde(default)]
+    pub window_amount: Option<f64>,
+    #[serde(default)]
+    pub window_amount_usd: Option<f64>,
+    #[serde(default)]
+    pub window_amount_pct_of_supply: Option<f64>,
+    pub mint: String,
+    pub token: LockTokenInfo,
+    pub lock: UnlockLockRef,
+}
+
+/// Pagination block of [`TokenUnlocksResponse`]. `total_in_window` counts
+/// every matching event in the window, not just the returned page.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenUnlocksPagination {
+    pub limit: u32,
+    pub count: u32,
+    pub total_in_window: i64,
+    pub has_more: bool,
+}
+
+/// `GET /tokens/unlocks` — upcoming unlock events across all active
+/// contracts inside a window. Continuous per-second streams (Streamflow
+/// payroll) contribute only their cliff / final events.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenUnlocksResponse {
+    pub window: UnlockWindowInfo,
+    #[serde(default)]
+    pub unlocks: Vec<TokenUnlock>,
+    pub pagination: TokenUnlocksPagination,
+    #[serde(default)]
+    pub meta: Option<serde_json::Value>,
+}
+
+/// Payload of a `token:lock` stream event — one frame per NEW Streamflow /
+/// Jupiter Lock / Bonfida lock or vesting contract, emitted the moment the
+/// account is first seen (~seconds after the create tx). Delivered on the
+/// `token:locks` WebSocket channel (PRO+). Updates (claims / cancels /
+/// closes) are NOT pushed — poll
+/// [`Token::locks`](crate::api::token::Token::locks) for the live state.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenLockEvent {
+    pub lock_account: String,
+    pub program: LockProgram,
+    pub mint: String,
+    pub kind: LockKind,
+    #[serde(default)]
+    pub sender: Option<String>,
+    #[serde(default)]
+    pub recipient: Option<String>,
+    /// Base units as a decimal STRING.
+    pub amount_raw: String,
+    /// May be `None` on the very first sighting of a mint.
+    #[serde(default)]
+    pub decimals: Option<i64>,
+    #[serde(default)]
+    pub start_at: Option<String>,
+    #[serde(default)]
+    pub cliff_at: Option<String>,
+    #[serde(default)]
+    pub end_at: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub tx_signature: Option<String>,
+    #[serde(default)]
+    pub slot: Option<i64>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+}
+
+// ─── pump.fun creator-fee sharing (/tokens/{mint}/fee-shares, /tokens/fee-claims) — v0.26 ───
+
+/// Where the `SharingConfig` in a [`TokenFeeSharesResponse`] came from:
+/// `Stream` = our table (only NON-default splits are stored), `Chain` = a live
+/// PDA read (so `is_default: true` — 100% to the creator — is a real answer).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FeeConfigSource {
+    Stream,
+    Chain,
+    #[serde(other)]
+    Other,
+}
+
+/// pump.fun fee-event type. `CreatorClaim` (the plain creator vault claim —
+/// per creator, carries no mint) is excluded from the feed unless requested
+/// via [`TokenFeeClaimsParams::event_type`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FeeEventType {
+    SharesCreated,
+    SharesUpdated,
+    SharesReset,
+    Distribution,
+    SocialPdaCreated,
+    SocialClaim,
+    CreatorTransferred,
+    CreatorClaim,
+    #[serde(other)]
+    Other,
+}
+
+impl FeeEventType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SharesCreated => "shares_created",
+            Self::SharesUpdated => "shares_updated",
+            Self::SharesReset => "shares_reset",
+            Self::Distribution => "distribution",
+            Self::SocialPdaCreated => "social_pda_created",
+            Self::SocialClaim => "social_claim",
+            Self::CreatorTransferred => "creator_transferred",
+            Self::CreatorClaim => "creator_claim",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// Platform identity behind a `SocialFeePda` shareholder — fees earmarked
+/// for e.g. an X account. `platform` 2 = X (`platform_label: "x"`); other
+/// ids read `platform_<n>` until observed. `user_id` is the platform-native
+/// numeric id, NOT the handle.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeeShareSocial {
+    pub platform: i64,
+    #[serde(default)]
+    pub platform_label: Option<String>,
+    pub user_id: String,
+    /// Lifetime claimed by this identity, quote base units as a decimal STRING.
+    #[serde(default)]
+    pub lifetime_claimed_raw: Option<String>,
+    #[serde(default)]
+    pub lifetime_claimed: Option<f64>,
+    #[serde(default)]
+    pub lifetime_claimed_usd: Option<f64>,
+    #[serde(default)]
+    pub last_claimed_at: Option<String>,
+}
+
+/// One fee-share recipient — a current shareholder
+/// ([`FeeSharingConfig::shareholders`]), a distribution recipient
+/// ([`FeeDistributions::recipients`]) or a past recipient no longer in the
+/// split ([`FeeDistributions::past_recipients`]; `share_bps` then `None`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeeShareholder {
+    pub address: String,
+    #[serde(default)]
+    pub share_bps: Option<i64>,
+    #[serde(default)]
+    pub share_pct: Option<f64>,
+    /// The config admin (normally the coin creator).
+    #[serde(default)]
+    pub is_admin: bool,
+    /// Address is a pump_fees `SocialFeePda` — fees earmarked for a platform
+    /// identity ([`FeeShareholder::social`]).
+    #[serde(default)]
+    pub is_social_pda: bool,
+    #[serde(default)]
+    pub social: Option<FeeShareSocial>,
+    /// Received via distributions since 2026-08-17, quote base units as a
+    /// decimal STRING.
+    #[serde(default)]
+    pub received_raw: Option<String>,
+    #[serde(default)]
+    pub received: Option<f64>,
+    #[serde(default)]
+    pub received_usd: Option<f64>,
+    #[serde(default)]
+    pub payout_count: i64,
+    #[serde(default)]
+    pub last_payout_at: Option<String>,
+}
+
+/// The on-chain pump.fun `SharingConfig` of a coin (pump_fees PDA
+/// `["sharing-config", mint]`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeeSharingConfig {
+    /// The SharingConfig PDA.
+    pub sharing_config: String,
+    #[serde(default)]
+    pub admin: Option<String>,
+    #[serde(default)]
+    pub admin_revoked: Option<bool>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub version: Option<i64>,
+    /// `Some(true)` = 100% to the admin — no redirect.
+    #[serde(default)]
+    pub is_default: Option<bool>,
+    /// Share (bps) going to non-admin addresses.
+    #[serde(default)]
+    pub redirected_bps: i64,
+    #[serde(default)]
+    pub redirected_pct: f64,
+    /// Share (bps) going to `SocialFeePda` addresses.
+    #[serde(default)]
+    pub social_bps: i64,
+    #[serde(default)]
+    pub social_pct: f64,
+    #[serde(default)]
+    pub shareholders: Vec<FeeShareholder>,
+    pub source: FeeConfigSource,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+/// Quote asset the fee amounts are denominated in (SOL unless a
+/// stable-quoted coin).
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeeQuote {
+    pub symbol: String,
+    pub decimals: i64,
+    #[serde(default)]
+    pub sol_usd: Option<f64>,
+}
+
+/// Roll-up of every `distribute_creator_fees` payout on the mint since
+/// 2026-08-17 (pro-rata per shareholder).
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeeDistributions {
+    pub count: i64,
+    /// Quote base units as a decimal STRING.
+    pub total_raw: String,
+    #[serde(default)]
+    pub total: Option<f64>,
+    #[serde(default)]
+    pub total_usd: Option<f64>,
+    #[serde(default)]
+    pub last_at: Option<String>,
+    /// Current shareholders with what each has received.
+    #[serde(default)]
+    pub recipients: Vec<FeeShareholder>,
+    /// Addresses that received payouts but are no longer in the split.
+    #[serde(default)]
+    pub past_recipients: Vec<FeeShareholder>,
+    #[serde(default)]
+    pub payouts_considered: i64,
+    #[serde(default)]
+    pub payouts_truncated: bool,
+}
+
+/// One recent `distribute_creator_fees` payout.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeeRecentDistribution {
+    pub at: String,
+    pub tx_signature: String,
+    /// Quote base units as a decimal STRING.
+    pub amount_raw: String,
+    #[serde(default)]
+    pub amount: Option<f64>,
+    #[serde(default)]
+    pub amount_usd: Option<f64>,
+    /// Per-shareholder split of this payout (untyped — shape follows the
+    /// decoded Anchor event).
+    #[serde(default)]
+    pub shareholders: Vec<serde_json::Value>,
+    /// Transaction signer.
+    #[serde(default)]
+    pub actor: Option<String>,
+}
+
+/// `GET /tokens/{mint}/fee-shares` — pump.fun creator-fee sharing on a mint:
+/// who receives what share of the creator fees, the distributions rollup and
+/// the config change log. **Event history starts 2026-08-17.**
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenFeeSharesResponse {
+    pub mint: String,
+    /// `None` only when the live read failed on every RPC endpoint
+    /// (`config_error` set).
+    #[serde(default)]
+    pub config: Option<FeeSharingConfig>,
+    /// The SharingConfig PDA address.
+    pub config_pda: String,
+    #[serde(default)]
+    pub config_error: Option<String>,
+    pub quote: FeeQuote,
+    pub distributions: FeeDistributions,
+    /// Config changes + creator transfers, newest first (untyped rows).
+    #[serde(default)]
+    pub history: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub recent_distributions: Vec<FeeRecentDistribution>,
+    #[serde(default)]
+    pub meta: Option<serde_json::Value>,
+}
+
+/// Platform identity on a `social_claim` / `social_pda_created` fee event.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeeClaimSocial {
+    /// Raw platform id (2 = X).
+    pub platform: i64,
+    #[serde(default)]
+    pub platform_label: Option<String>,
+    /// Platform-native numeric user id, not the handle.
+    pub user_id: String,
+    /// The `SocialFeePda` address.
+    #[serde(default)]
+    pub pda: Option<String>,
+}
+
+/// A shareholder as recorded on a config-change event.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeeClaimShareholder {
+    pub address: String,
+    pub share_bps: i64,
+}
+
+/// `distribution` only: the pro-rata amount paid to one shareholder.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeeClaimPayout {
+    pub address: String,
+    pub share_bps: i64,
+    /// Quote base units as a decimal STRING.
+    pub amount_raw: String,
+    #[serde(default)]
+    pub amount: Option<f64>,
+    #[serde(default)]
+    pub amount_usd: Option<f64>,
+}
+
+/// One decoded pump.fun fee event on the feed.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeeClaimEvent {
+    pub id: i64,
+    #[serde(rename = "type")]
+    pub event_type: FeeEventType,
+    /// The event's own on-chain timestamp, ISO 8601.
+    pub at: String,
+    pub tx_signature: String,
+    #[serde(default)]
+    pub slot: Option<i64>,
+    /// `None` for social claims and creator vault claims (per identity / per
+    /// creator).
+    #[serde(default)]
+    pub mint: Option<String>,
+    #[serde(default)]
+    pub admin: Option<String>,
+    /// Transaction signer.
+    #[serde(default)]
+    pub actor: Option<String>,
+    /// Payout / claim recipient wallet, or the new creator.
+    #[serde(default)]
+    pub recipient: Option<String>,
+    /// Quote base units as a decimal STRING (SOL lamports unless a
+    /// stable-quoted coin).
+    #[serde(default)]
+    pub amount_raw: Option<String>,
+    #[serde(default)]
+    pub amount: Option<f64>,
+    #[serde(default)]
+    pub amount_usd: Option<f64>,
+    /// Quote symbol (`"SOL"` …).
+    #[serde(default)]
+    pub quote: Option<String>,
+    #[serde(default)]
+    pub social: Option<FeeClaimSocial>,
+    #[serde(default)]
+    pub shareholders: Option<Vec<FeeClaimShareholder>>,
+    /// `distribution` only: pro-rata amount per shareholder.
+    #[serde(default)]
+    pub payouts: Option<Vec<FeeClaimPayout>>,
+    /// Full decoded Anchor event.
+    #[serde(default)]
+    pub payload: Option<serde_json::Value>,
+}
+
+/// Query params for [`Token::fee_claims`](crate::api::token::Token::fee_claims).
+/// Unset fields are omitted from the query string.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TokenFeeClaimsParams {
+    /// Comma list of event types (`"distribution,social_claim"`); default is
+    /// every type except `creator_claim`. Serialised as `type=`.
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub event_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mint: Option<String>,
+    /// Payout / claim recipient wallet, or new creator.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipient: Option<String>,
+    /// Transaction signer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor: Option<String>,
+    /// Raw platform id (2 = X).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub social_platform: Option<i64>,
+    /// Platform-native numeric user id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub social_user_id: Option<String>,
+    /// Amount floor in SOL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_sol: Option<f64>,
+    /// ISO 8601 cursor (`pagination.next_since`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    /// ISO 8601 — page back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before: Option<String>,
+    /// 1–100; default 50.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// `GET /tokens/fee-claims` — pump.fun fee-event feed, newest first. Pushed
+/// live as `token:fee_claim` on the `token:fee_claims` channel
+/// ([`TokenFeeClaimEvent`]). **History starts 2026-08-17.**
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenFeeClaimsResponse {
+    #[serde(default)]
+    pub events: Vec<FeeClaimEvent>,
+    pub pagination: TimeCursorPagination,
+    #[serde(default)]
+    pub stream: Option<StreamPointer>,
+    #[serde(default)]
+    pub meta: Option<serde_json::Value>,
+}
+
+/// Payload of a `token:fee_claim` stream event — one frame per stored
+/// pump.fun fee event, emitted the moment the tx confirms. Delivered on the
+/// `token:fee_claims` WebSocket channel (PRO+). NOTE: this is the writer's
+/// raw row, not the enriched REST [`FeeClaimEvent`] — no `amount` /
+/// `amount_usd`, and the social identity is flattened into
+/// `social_platform` / `social_user_id` / `social_fee_pda`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenFeeClaimEvent {
+    pub id: i64,
+    pub event_type: FeeEventType,
+    pub tx_signature: String,
+    #[serde(default)]
+    pub slot: Option<i64>,
+    /// The event's own on-chain timestamp, ISO 8601.
+    pub block_time: String,
+    /// `None` for social claims and creator vault claims.
+    #[serde(default)]
+    pub mint: Option<String>,
+    #[serde(default)]
+    pub sharing_config: Option<String>,
+    #[serde(default)]
+    pub admin: Option<String>,
+    #[serde(default)]
+    pub actor: Option<String>,
+    #[serde(default)]
+    pub recipient: Option<String>,
+    /// Quote base units as a decimal STRING.
+    #[serde(default)]
+    pub amount_raw: Option<String>,
+    #[serde(default)]
+    pub quote_mint: Option<String>,
+    #[serde(default)]
+    pub social_platform: Option<i64>,
+    #[serde(default)]
+    pub social_user_id: Option<String>,
+    #[serde(default)]
+    pub social_fee_pda: Option<String>,
+    #[serde(default)]
+    pub shareholders: Option<serde_json::Value>,
+}
+
 // ─── Token OHLC candles (/tokens/{mint}/candles) ────────────────────────────
 
 /// Query params for [`Token::candles`](crate::api::token::Token::candles).
