@@ -134,6 +134,47 @@ impl Token {
             .await
     }
 
+    /// v0.25 — Live holders, holder count + concentration for a Solana mint
+    /// (`GET /tokens/{mint}/holders`, PRO+): a full holder census read from
+    /// the ledger at `confirmed` (every token account of the mint, owner +
+    /// balance, merged per owner) — who holds NOW, as opposed to
+    /// [`Alpha::cap_table`](crate::api::alpha::Alpha::cap_table) (who bought
+    /// first).
+    ///
+    /// Hard truths the payload states rather than hides:
+    /// - `amount_raw` on every [`TokenHolder`] and [`TokenHoldersExcluded`] is
+    ///   a raw u64 **string** — never a float; parse it yourself. `amount` is
+    ///   the UI-scaled convenience number.
+    /// - [`TokenHoldersConcentration::holder_count`] is EXACT (distinct
+    ///   non-zero owners minus excluded pools/curves/burns) and `None` ONLY
+    ///   when the provider refused the census for a mega-cap mint — then
+    ///   `source.method` is [`HoldersMethod::GetTokenLargestAccounts`] (top-20
+    ///   view) and `source.census_fallback_reason` is set. It is never
+    ///   estimated from trades.
+    /// - Pools, bonding curves, burns and unattributed program accounts are
+    ///   EXCLUDED from the circulating denominator and listed in `excluded`,
+    ///   each NAMED where we can ([`HolderExcludedReason::Pool`] + `dex` +
+    ///   `pool_address`, `BondingCurve` for pump.fun/LaunchLab, `Burn`, else
+    ///   `ProgramAccount`). The #1 raw account of a fresh memecoin is its own
+    ///   bonding curve.
+    /// - Disclosure is tier-gated (**PRO** ranks 1–10, **ULTRA** 1–50,
+    ///   **BUSINESS** 1–100); the concentration maths is tier-independent.
+    /// - `labels` are from MadeOnSol data — empty means unknown to us, not clean.
+    ///
+    /// Latency: fresh pump.fun mints <1 s; 200k–550k-account tokens 6–11 s.
+    /// While the upstream scan is still running the API answers **503** with
+    /// `error_kind: "holder_scan_in_progress"` and `retry_after_seconds: 20` —
+    /// the scan continues and is cached, so the retry is instant. 503
+    /// `holder_rpc_unavailable` (`retry_after_seconds: 15`) is a fail-closed
+    /// RPC outage. Both arrive as [`Error::Api`](crate::Error::Api)
+    /// with `status == 503`; read `error_kind` / `retry_after_seconds` from
+    /// the `body`. Unknown mint: 404 `error_kind: "not_a_mint"`.
+    pub async fn holders(&self, mint: &str) -> Result<TokenHoldersResponse> {
+        self.core
+            .get(&format!("/tokens/{}/holders", mint), &())
+            .await
+    }
+
     /// v0.15 — 1-minute OHLC candles for a token, aggregated from the trade
     /// firehose. Returns open/high/low/close, USD volume, trade count, and
     /// market cap per bar. ULTRA unlocks buy/sell volume split, net flow,

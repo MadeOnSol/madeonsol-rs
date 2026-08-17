@@ -20,6 +20,8 @@ async, `tokio`-based, `rustls`-only.
 >
 > **This is the keyed REST SDK** — authenticate with an API key (`msk_…`). It covers the full endpoint surface (KOL intelligence, deployer intel, token risk/buyer-quality/bundle, Signal Scorecard, wallet PnL, DEX firehose). Want **x402 pay-per-call** instead — no signup, your agent's wallet pays per request in USDC? Use the TypeScript [`madeonsol-x402`](https://www.npmjs.com/package/madeonsol-x402) or Python [`madeonsol-x402`](https://pypi.org/project/madeonsol-x402/) clients.
 
+> **New in 0.25.0 — live holder census: exact holder count, labelled holders, and pools that are named, not just excluded.** `client.token().holders(mint)` (typed `TokenHoldersResponse`) binds `GET /tokens/{mint}/holders` (PRO+): every token account of the mint read from the ledger at `confirmed` and merged per owner, so `concentration.holder_count` is EXACT (distinct non-zero owners minus pools / bonding curves / burns) — never a trade-derived estimate; it is `null` only when the provider refuses the census for a mega-cap, in which case you get the top-20 view and `source.census_fallback_reason` says so. Each disclosed owner carries our labels (`deployer` / `kol` / `early_buyer` / `bundle` / `bot` / `dump_cluster` — empty means unknown to us, not clean), and `excluded[]` NAMES what was taken out of the circulating denominator: `reason` = `pool` (with `dex` + `pool_address`), `bonding_curve` (pump.fun / LaunchLab), `burn`, or `program_account` only when we genuinely cannot attribute the PDA; `pool_pct` / `burned_pct` / `program_pct` split the exclusion. Amounts are raw u64 **strings**. Disclosure: PRO ranks 1–10, ULTRA 1–50, BUSINESS 1–100 — the maths is tier-independent. Big tokens take 5–30 s upstream: you get `503 holder_scan_in_progress` with `retry_after_seconds: 20` while the scan finishes into the cache, and the retry is instant.
+
 > **New in 0.24.0 — two prices on the trade tape, and the right one is now the default.** The trade tape now tells you what a trade actually cost. `price_sol`/`price_usd` on each trade are THIS trade's executed price — `sol_amount / token_amount`, reconciling exactly with the amounts on the same row and with the PnL endpoints. Because `sol_amount` is the wallet's net SOL movement, that is the trader's all-in effective rate: swap fee and any account rent included, not the pool mid. The market-cap tracker's canonical pool price moved to the new **`market_price_sol`/`market_price_usd`** fields — sampled once per token per pool update, so every trade in the same slot shares it. Until now `price_sol` carried that canonical value and disagreed with the row's own amounts by a **7.9% median** (p90 ~74%): a stale market price reads low in a pump and high in a dump, so anything you averaged out of the tape inherited the bias instead of cancelling it. Use `price_sol` for cost basis, fills and PnL; `market_price_sol` for a per-token series independent of trade size and direction. `TokenTrade` and `WalletTrade` carry all four as `Option<f64>`, so an older server that omits them still deserializes.
 
 > **New in 0.23.0** — **Pool depth / price impact + dev block on risk.** `client.token.depth(mint, &params)` (`GET /tokens/{mint}/depth`, PRO+) returns per-pool price-impact / slippage: for each supported pool a `DepthPool` with `spot_price_sol`, `fee_pct`, `source` (`"stream"` reserves or `"live_rpc"` curve virtual reserves), `reserves_age_ms`, per-size `DepthQuote`s (`size_sol`, `tokens_out`, `avg_price_sol`, `price_impact_pct`), and `to_move_price` (`DepthToMovePrice` — SOL to move the price 1/5/10%). Exact for constant-product AMMs and correct for pump.fun/bonk curves; concentrated pools (CLMM/Orca/DLMM), Meteora-DBC curves, and unclassified pools come back in `unsupported_pools` with a machine-readable `reason` instead of a wrong number. Pick buy sizes with `DepthParams::from_sizes(&[0.5, 1.0, 5.0, 10.0])` (`?sizes=` CSV, max 8, each ≤10000; default `0.5,1,5,10`). `client.token.risk(mint)` also gains a top-level `dev: Option<RiskDev>` block — deployer wallet activity: `buy_sol`/`buy_tokens`/`buy_supply_pct` at create, `bought_tokens_after` (catches the same-second-separate-tx dev buy), `sold_tokens`/`sold_sol`, `first_sell_at`/`last_sell_at`, live on-chain `holdings_tokens`/`holdings_supply_pct`/`wallet_empty`, and a coverage-gated `transferred_out` flag (every field `None` when unobservable — never a guess). New types: `DepthParams`, `TokenDepthResponse`, `DepthPool`, `DepthUnsupportedPool`, `DepthQuote`, `DepthToMovePrice`, `RiskDev`.
@@ -73,7 +75,7 @@ Annual: PRO €430/yr, ULTRA €1,310/yr, BUSINESS €4,000/yr (2 months free). 
 
 ```toml
 [dependencies]
-madeonsol = "0.23"
+madeonsol = "0.25"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -123,7 +125,7 @@ The `MadeOnSol` client exposes namespaced sub-clients:
 | `client.kol` | KOL feed, leaderboard, coordination, PnL, trending tokens, alerts, compare, **first_touches**, **scout_leaderboard**, **coordination_history** |
 | `client.deployer` | Pump.fun deployer leaderboard, alerts, trajectory (+ daily snapshots), **history**, bonded tokens |
 | `client.alpha` | Alpha-wallet leaderboard, profiles, cap tables, buyer quality |
-| `client.token` | Per-mint snapshot, batch lookup, buyer quality, **kol_consensus**, **peak_history**, **risk** (+ `dev` block, 0.23), **batch_risk**, **bundle**, **pools**, **depth** *(new 0.23 — per-pool price impact)*, **candles**, **token_flow**, **trades** *(new 0.22 — mint-scoped trade tape)*, **almost_bonded**, directory list |
+| `client.token` | Per-mint snapshot, batch lookup, buyer quality, **kol_consensus**, **peak_history**, **risk** (+ `dev` block, 0.23), **batch_risk**, **bundle**, **pools**, **holders** *(new — live holder census + concentration)*, **depth** *(new 0.23 — per-pool price impact)*, **candles**, **token_flow**, **trades** *(new 0.22 — mint-scoped trade tape)*, **almost_bonded**, directory list |
 | `client.wallet_tracker` | Track arbitrary Solana wallets — watchlist CRUD, swap/transfer history |
 | `client.wallet` | Universal wallet endpoints — stats + cross-product flags + derived analytics, FIFO PnL, open positions, paginated trades, **batch_classify** *(new 0.22 — bulk reputation flags, 1–100 wallets)* (PRO+), verified on-chain holdings (ULTRA) |
 | `client.coordination_alerts` | Push alerts on coordinated buying (PRO/ULTRA) |
@@ -431,6 +433,81 @@ for t in res.tokens {
 # Ok(())
 # }
 ```
+
+## Live holders + concentration *(new)*
+
+`client.token.holders(mint)` (`GET /tokens/{mint}/holders`, PRO+) — a full
+holder census read from the ledger at `confirmed`: every token account of the
+mint (owner + balance), merged per owner. This is who holds **now**;
+`client.alpha.cap_table` is who bought first.
+
+- `concentration.holder_count` is **exact** (distinct non-zero owners minus
+  excluded pools/curves/burns, at `slot`) and `None` only when the provider
+  refused the census for a mega-cap mint — then `source.method` is
+  `HoldersMethod::GetTokenLargestAccounts` (top-20 view) and
+  `source.census_fallback_reason` is set. It is never estimated from trades.
+- `amount_raw` on every `TokenHolder` / `TokenHoldersExcluded` is a raw u64
+  **`String`** — never a float; parse it (`u64`/`u128`) yourself. `amount` is
+  the UI-scaled convenience `f64`.
+- Pools, bonding curves, burns and unattributed program accounts are
+  **excluded** from the circulating denominator and listed in `excluded`,
+  each named where possible: `HolderExcludedReason::Pool` (+ `dex`,
+  `pool_address`), `BondingCurve` (pump.fun / LaunchLab), `Burn`, else
+  `ProgramAccount`. The #1 raw account of a fresh memecoin is its own bonding
+  curve. `concentration.pool_pct` / `burned_pct` / `program_pct` split them
+  (over total supply).
+- Disclosure is tier-gated: **PRO** ranks 1–10, **ULTRA** 1–50, **BUSINESS**
+  1–100 (`disclosed` is your cap); `top1/top10/top20/top50/top100_share`, the
+  cohort `*_pct` values and `holder_count` are computed over the full set and
+  identical on every tier. All shares are 0–100.
+- Each holder carries `labels: Vec<HolderLabel>` from MadeOnSol wallet
+  intelligence (`Deployer` / `Kol` / `EarlyBuyer` / `Buyer` / `Bundle` /
+  `Bot` / `DumpCluster`) plus `kol_name`, `early_buyer_rank`,
+  `bot_confidence`, `historical_win_rate`. Empty labels = unknown to us, not
+  verified clean.
+- Latency: fresh pump.fun mints <1 s; 200k–550k-account tokens 6–11 s. While
+  the upstream scan is still running the API answers **503**
+  `error_kind: "holder_scan_in_progress"` with `retry_after_seconds: 20` — the
+  scan keeps going and is cached, so the retry is instant.
+  `holder_rpc_unavailable` (503, `retry_after_seconds: 15`) is a fail-closed
+  RPC outage. Both arrive as `Error::Api { status: 503, body, .. }` — read
+  `error_kind` / `retry_after_seconds` from `body`. Unknown mint: 404
+  `error_kind: "not_a_mint"`.
+
+```rust
+# async fn run(client: madeonsol::MadeOnSol) -> Result<(), Box<dyn std::error::Error>> {
+use madeonsol::Error;
+
+let mint = "So11111111111111111111111111111111111111112";
+let h = loop {
+    match client.token.holders(mint).await {
+        Ok(h) => break h,
+        Err(Error::Api { status: 503, body, .. })
+            if body["error_kind"] == "holder_scan_in_progress" =>
+        {
+            // scan continues upstream and is cached — the retry is instant
+            let secs = body["retry_after_seconds"].as_u64().unwrap_or(20);
+            tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+        }
+        Err(e) => return Err(e.into()),
+    }
+};
+
+println!(
+    "{:?} holders · top10 {:?}% of circulating · pools/curves {:?}% of supply ({} excluded)",
+    h.concentration.holder_count, h.concentration.top10_share, h.concentration.pool_pct, h.excluded.len(),
+);
+for holder in &h.holders {
+    let raw: u128 = holder.amount_raw.parse()?; // raw u64 string — never a float
+    println!("#{} {} raw={} {:?}", holder.rank, holder.owner, raw, holder.labels);
+}
+# Ok(())
+# }
+```
+
+New types: `TokenHoldersResponse`, `TokenHolder`, `TokenHoldersExcluded`,
+`TokenHoldersConcentration`, `TokenHoldersDeployer`, `TokenHoldersSource`,
+`HolderLabel`, `HolderExcludedReason`, `HoldersMethod`.
 
 ## Pool depth / price impact *(new in 0.23)*
 

@@ -2592,6 +2592,237 @@ pub struct TokenPoolsResponse {
     pub summary: PoolsSummary,
 }
 
+// ─── Token holders (/tokens/{mint}/holders) ─────────────────────────────────
+
+/// Wallet-intelligence label on a live holder. Labels come from MadeOnSol's
+/// swap-ledger data — an empty `labels` vec means "unknown to us", NOT
+/// "verified clean". `Other` catches labels added after this crate shipped.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HolderLabel {
+    Deployer,
+    Kol,
+    EarlyBuyer,
+    Buyer,
+    Bundle,
+    Bot,
+    DumpCluster,
+    #[serde(other)]
+    Other,
+}
+
+/// Why an owner was excluded from the circulating denominator and listed in
+/// `excluded`: `Pool` = vault authority of a known pool (`dex` + `pool_address`
+/// set); `BondingCurve` = pump.fun / LaunchLab curve; `Burn` = incinerator /
+/// system program; `ProgramAccount` = an off-curve owner we could not attribute
+/// to a known pool (vault, escrow, staking, unknown pool).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HolderExcludedReason {
+    Pool,
+    BondingCurve,
+    Burn,
+    ProgramAccount,
+    #[serde(other)]
+    Other,
+}
+
+/// How the holder set was read. `GetProgramAccountsCensus` = full mint-scoped
+/// census (exact `holder_count`, ranks 1–100 retained).
+/// `GetTokenLargestAccounts` = the top-20 fallback used only when the provider
+/// refuses the census for a mega-cap mint (`holder_count: None`,
+/// `source.census_fallback_reason` set).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum HoldersMethod {
+    #[serde(rename = "getProgramAccounts_census")]
+    GetProgramAccountsCensus,
+    #[serde(rename = "getTokenLargestAccounts")]
+    GetTokenLargestAccounts,
+    #[serde(other)]
+    Other,
+}
+
+/// One disclosed holder — token accounts merged per owner wallet.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenHolder {
+    /// 1-based rank by balance among non-excluded owners.
+    pub rank: i64,
+    /// Owner wallet (owner of the token account(s)).
+    pub owner: String,
+    /// Every non-zero token account of this owner for the mint.
+    #[serde(default)]
+    pub token_accounts: Vec<String>,
+    /// Raw u64 balance as a decimal STRING — never a float. Parse with
+    /// `amount_raw.parse::<u64>()` / `u128`.
+    pub amount_raw: String,
+    /// UI amount (`amount_raw / 10^decimals`); `None` when decimals are unknown.
+    #[serde(default)]
+    pub amount: Option<f64>,
+    /// Share of TOTAL supply, 0–100.
+    #[serde(default)]
+    pub pct_of_supply: Option<f64>,
+    /// Share of circulating supply (total minus pools/curves/burns), 0–100.
+    #[serde(default)]
+    pub pct_of_circulating: Option<f64>,
+    /// MadeOnSol labels. Empty = unknown to us, not verified clean.
+    #[serde(default)]
+    pub labels: Vec<HolderLabel>,
+    #[serde(default)]
+    pub kol_name: Option<String>,
+    /// This owner's rank in the token's early-buyer cohort, if any.
+    #[serde(default)]
+    pub early_buyer_rank: Option<i64>,
+    /// Alpha-wallet classifier enum (`"none"`/`"low"`/`"medium"`/`"high"`), not a number.
+    #[serde(default)]
+    pub bot_confidence: Option<String>,
+    #[serde(default)]
+    pub historical_win_rate: Option<f64>,
+}
+
+/// An owner excluded from the circulating denominator (pool / bonding curve /
+/// burn / unattributed program account), NAMED where possible.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenHoldersExcluded {
+    pub owner: String,
+    #[serde(default)]
+    pub token_accounts: Vec<String>,
+    /// Raw u64 balance as a decimal STRING — never a float.
+    pub amount_raw: String,
+    /// Share of TOTAL supply, 0–100.
+    #[serde(default)]
+    pub pct_of_supply: Option<f64>,
+    pub reason: HolderExcludedReason,
+    /// pumpfun | pumpswap | raydium | launchlab | meteora | orca | jupiter — when named.
+    #[serde(default)]
+    pub dex: Option<String>,
+    #[serde(default)]
+    pub pool_address: Option<String>,
+}
+
+/// Concentration over the FULL owner set — tier only governs how many ranks
+/// are disclosed in `holders`; these numbers are identical on
+/// PRO/ULTRA/BUSINESS. All `*_share` / `*_pct` values are 0–100 (or `None`
+/// when the denominator is unknown).
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenHoldersConcentration {
+    /// Exact distinct non-zero owners minus excluded pools/curves/burns, at
+    /// `slot` (census). `None` ONLY when the provider refused the census (see
+    /// `source.census_fallback_reason`) — never estimated from trades.
+    #[serde(default)]
+    pub holder_count: Option<i64>,
+    /// `"census"` when `holder_count` is exact; `None` on the top-20 fallback.
+    #[serde(default)]
+    pub holder_count_source: Option<String>,
+    #[serde(default)]
+    pub token_accounts_nonzero: Option<i64>,
+    /// Total supply, raw u64 as a string.
+    #[serde(default)]
+    pub supply_raw: Option<String>,
+    /// Supply minus excluded owners, raw u64 as a string.
+    #[serde(default)]
+    pub circulating_raw: Option<String>,
+    #[serde(default)]
+    pub decimals: Option<i64>,
+    /// Shares of CIRCULATING supply held by ranks 1 / 1–10 / 1–20.
+    #[serde(default)]
+    pub top1_share: Option<f64>,
+    #[serde(default)]
+    pub top10_share: Option<f64>,
+    #[serde(default)]
+    pub top20_share: Option<f64>,
+    /// Census only — `None` on the top-20 fallback.
+    #[serde(default)]
+    pub top50_share: Option<f64>,
+    /// Census only — `None` on the top-20 fallback.
+    #[serde(default)]
+    pub top100_share: Option<f64>,
+    /// Share of TOTAL supply in excluded owners (= pool_pct + burned_pct + program_pct).
+    #[serde(default)]
+    pub pool_and_program_pct: Option<f64>,
+    /// Share of total supply in NAMED pools + bonding curves.
+    #[serde(default)]
+    pub pool_pct: Option<f64>,
+    /// Share of total supply at burn addresses.
+    #[serde(default)]
+    pub burned_pct: Option<f64>,
+    /// Share of total supply held by off-curve owners we could not attribute.
+    #[serde(default)]
+    pub program_pct: Option<f64>,
+    /// Shares of circulating supply held by labelled cohorts.
+    #[serde(default)]
+    pub deployer_pct: Option<f64>,
+    #[serde(default)]
+    pub kol_pct: Option<f64>,
+    #[serde(default)]
+    pub early_buyer_pct: Option<f64>,
+    #[serde(default)]
+    pub bundle_pct: Option<f64>,
+    #[serde(default)]
+    pub bot_pct: Option<f64>,
+    #[serde(default)]
+    pub dump_cluster_pct: Option<f64>,
+    #[serde(default)]
+    pub distinct_owners_in_top20: i64,
+    /// How many ranked owners the scan retained (≤100 census, ≤20 fallback).
+    #[serde(default)]
+    pub ranked_owners_available: i64,
+}
+
+/// Tracked deployer of the mint, when known.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenHoldersDeployer {
+    pub wallet: String,
+    pub tier: String,
+    #[serde(default)]
+    pub bonding_rate: Option<f64>,
+}
+
+/// How the holder set was produced.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenHoldersSource {
+    pub method: HoldersMethod,
+    /// SPL Token or Token-2022 program id the mint lives under (pump.fun = Token-2022).
+    #[serde(default)]
+    pub token_program: Option<String>,
+    /// Ranks retained by the scan: 100 (census) or 20 (fallback).
+    #[serde(default)]
+    pub rpc_cap: i64,
+    #[serde(default)]
+    pub commitment: String,
+    #[serde(default)]
+    pub scan_ms: i64,
+    /// Set when the census was refused and the top-20 fallback was served.
+    #[serde(default)]
+    pub census_fallback_reason: Option<String>,
+    #[serde(default)]
+    pub note: String,
+}
+
+/// `GET /tokens/{mint}/holders` — live holder census + concentration for a
+/// Solana mint, read from the ledger at `confirmed` (who holds NOW, as
+/// opposed to `alpha.cap_table`, which is who bought first).
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenHoldersResponse {
+    pub mint: String,
+    /// Ledger slot the holder set was read at.
+    pub slot: i64,
+    pub as_of: String,
+    /// Disclosed ranks: PRO 1–10, ULTRA 1–50, BUSINESS 1–100 (≤20 on the fallback).
+    #[serde(default)]
+    pub holders: Vec<TokenHolder>,
+    pub count: i64,
+    /// Rank cap for your tier: 10 PRO, 50 ULTRA, 100 BUSINESS.
+    pub disclosed: i64,
+    /// Pools / bonding curves / burns / unattributed program accounts —
+    /// excluded from the circulating denominator, named where possible.
+    #[serde(default)]
+    pub excluded: Vec<TokenHoldersExcluded>,
+    pub concentration: TokenHoldersConcentration,
+    #[serde(default)]
+    pub deployer: Option<TokenHoldersDeployer>,
+    pub source: TokenHoldersSource,
+}
+
 // ─── Token OHLC candles (/tokens/{mint}/candles) ────────────────────────────
 
 /// Query params for [`Token::candles`](crate::api::token::Token::candles).
