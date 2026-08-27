@@ -11,14 +11,35 @@ pub struct Stream {
 }
 
 impl Stream {
-    /// Generate a 24-hour WebSocket streaming token.
+    /// Issue your WebSocket streaming token (`POST /stream/token`).
+    ///
+    /// **Stream tokens do not expire** (since 2026-08-27): this returns the
+    /// SAME token on every call, so it is safe to call on every reconnect and
+    /// there is nothing to refresh on a timer. The token only stops working
+    /// when your subscription lapses or you replace it with
+    /// [`rotate_token`](Self::rotate_token). A WebSocket close code `4001`
+    /// means "call this again and reconnect", never "the token timed out".
     ///
     /// PRO/ULTRA: returns `ws_url` for KOL/deployer event streaming.
     /// ULTRA: also returns `dex_ws_url` for the all-DEX trade firehose.
     ///
-    /// Connect by appending `?token=<token>` to the returned URL.
+    /// Connect by appending `?token=<token>` to the returned URL (or send it
+    /// as `Authorization: Bearer <token>` on the handshake).
     pub async fn get_token(&self) -> Result<StreamToken> {
         self.core.post_empty("/stream/token").await
+    }
+
+    /// v0.26.1 — Rotate your streaming token (`POST /stream/token` with
+    /// `{"rotate": true}`).
+    ///
+    /// Mints a fresh token and retires the current one; the replaced value
+    /// keeps working for 60 s so live sockets can reconnect on the new one.
+    /// Use this if a token leaks — there is no reason to rotate on a schedule,
+    /// because tokens do not expire. The response has `rotated == Some(true)`.
+    pub async fn rotate_token(&self) -> Result<StreamToken> {
+        self.core
+            .post_json("/stream/token", &serde_json::json!({ "rotate": true }))
+            .await
     }
 
     /// v0.19 — List your live WebSocket sessions (PRO/ULTRA).

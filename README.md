@@ -20,6 +20,8 @@ async, `tokio`-based, `rustls`-only.
 >
 > **This is the keyed REST SDK** — authenticate with an API key (`msk_…`). It covers the full endpoint surface (KOL intelligence, deployer intel, token risk/buyer-quality/bundle, Signal Scorecard, wallet PnL, DEX firehose). Want **x402 pay-per-call** instead — no signup, your agent's wallet pays per request in USDC? Use the TypeScript [`madeonsol-x402`](https://www.npmjs.com/package/madeonsol-x402) or Python [`madeonsol-x402`](https://pypi.org/project/madeonsol-x402/) clients.
 
+> **New in 0.26.1 — fix: stream tokens never expire, and `StreamToken` deserializes again.** Since 2026-08-27 `POST /stream/token` returns the SAME token on every call and it never expires — it stops working only if your subscription lapses or you replace it with `{"rotate": true}` (the old value keeps working for 60 s). The API now sends `expires_at: null` and `next_refresh_at: null`, which 0.26.0's `StreamToken { expires_at: String }` refused to deserialize, so `client.stream.get_token()` errored for every caller. **`StreamToken.expires_at` is now `Option<String>`** (always `None`; kept for wire compatibility — do not schedule refreshes on it), `next_refresh_at` stays `Option<String>` (always `None`), and two fields are new: `rotated: Option<bool>` (`Some(true)` when the call replaced an existing token) and `lifetime: Option<String>` (the server's plain-English statement of the above). New method **`client.stream.rotate_token()`** sends `{"rotate": true}` for the leaked-token case. A WebSocket close code `4001` means "call `get_token()` again and reconnect", never "the token timed out".
+
 > **New in 0.26.0 — token locks & vesting, upcoming unlocks, and pump.fun creator-fee sharing.** Five keyed (PRO+) methods on `client.token` + two WebSocket channels. `token.locks(mint, &TokenLocksParams)` (`GET /tokens/{mint}/locks`, typed `TokenLocksResponse`) — every on-chain Streamflow / Jupiter Lock / Bonfida vesting contract on a mint with the schedule (start / cliff / period / end), the terms (`cancelable_by_sender` — a cancelable lock is a weaker promise — `cancelable_by_recipient`, `transferable`, `can_topup`) and a live-derived view (`locked_raw` now, `unlocked`, `withdrawn`, `claimable`, `LockStatus`, `next_unlock`), plus a `TokenLocksSummary` (exact `lock_count`, `distinct_lockers`, locked / deposited raw + ui + usd + % of supply, `unlocking_7d_*` / `unlocking_30d_*`, nearest `next_unlock`, `active_cancelable_by_sender`). `token.locks_feed(&TokenLocksFeedParams)` (`GET /tokens/locks`) — cross-token feed of NEW contracts, newest first, `since` / `before` cursors from `pagination.next_since` / `next_before`. `token.unlocks(&TokenUnlocksParams)` (`GET /tokens/unlocks`) — upcoming unlock EVENTS (`UnlockEventKind`: cliff / period / final / tranche) inside `UnlockWindow` `1h`…`90d` with `amount_*` and `window_amount_*`, sorted by `UnlocksSort`. **LP locks are NOT included** in any of the three. `token.fee_shares(mint)` (`GET /tokens/{mint}/fee-shares`, typed `TokenFeeSharesResponse`) — the pump.fun `SharingConfig`: who receives what share (bps) of a coin's creator fees, `is_admin` / `is_social_pda` (fees earmarked for an X account etc. — `FeeShareSocial::platform` 2 = X, `user_id` = the platform-native numeric id), `redirected_bps`, `social_bps`, `is_default: Some(true)` = 100% to the creator, plus the `FeeDistributions` rollup and config `history`. `token.fee_claims(&TokenFeeClaimsParams)` (`GET /tokens/fee-claims`) — the fee-event feed (`FeeEventType`: `Distribution` with `payouts`, `SocialClaim`, `SharesCreated` / `SharesUpdated` / `SharesReset`, `CreatorTransferred`; `CreatorClaim` only when asked via `event_type`). **Fee history starts 2026-08-17.** Every base-unit amount (`*_raw`) is a **`String`**; ui / usd / pct companions are `Option` and `None` when decimals or price are unknown. Streams: `token:locks` (event `token:lock`, payload `TokenLockEvent`, one frame per NEW contract) and `token:fee_claims` (event `token:fee_claim`, payload `TokenFeeClaimEvent`). **Keyed (`msk_`) API only — none of these are on the x402 rail; BASIC gets HTTP 403.**
 
 > **New in 0.25.0 — live holder census: exact holder count, labelled holders, and pools that are named, not just excluded.** `client.token().holders(mint)` (typed `TokenHoldersResponse`) binds `GET /tokens/{mint}/holders` (PRO+): every token account of the mint read from the ledger at `confirmed` and merged per owner, so `concentration.holder_count` is EXACT (distinct non-zero owners minus pools / bonding curves / burns) — never a trade-derived estimate; it is `null` only when the provider refuses the census for a mega-cap, in which case you get the top-20 view and `source.census_fallback_reason` says so. Each disclosed owner carries our labels (`deployer` / `kol` / `early_buyer` / `bundle` / `bot` / `dump_cluster` — empty means unknown to us, not clean), and `excluded[]` NAMES what was taken out of the circulating denominator: `reason` = `pool` (with `dex` + `pool_address`), `bonding_curve` (pump.fun / LaunchLab), `burn`, or `program_account` only when we genuinely cannot attribute the PDA; `pool_pct` / `burned_pct` / `program_pct` split the exclusion. Amounts are raw u64 **strings**. Disclosure: PRO ranks 1–10, ULTRA 1–50, BUSINESS 1–100 — the maths is tier-independent. Big tokens take 5–30 s upstream: you get `503 holder_scan_in_progress` with `retry_after_seconds: 20` while the scan finishes into the cache, and the retry is instant.
@@ -136,7 +138,7 @@ The `MadeOnSol` client exposes namespaced sub-clients:
 | `client.signals` *(new 0.16)* | **Signal Scorecard** — out-of-sample, machine-readable signal reliability (`performance`) + discovery catalog |
 | `client.sniper` *(new 0.11)* | **Deshred** pre-confirm pump.fun deploy feed (~500ms head start) + custom deployer watchlist (PRO/ULTRA) |
 | `client.tools` | Solana tool directory search |
-| `client.stream` | Issue 24h WebSocket streaming tokens, **list / kill live sessions** |
+| `client.stream` | Issue WebSocket streaming tokens (**non-expiring since 2026-08-27**), **rotate** them *(new 0.26.1)*, **list / kill live sessions** |
 | `client.webhooks` | Webhook CRUD (PRO/ULTRA) |
 
 Full reference: <https://docs.rs/madeonsol> · Interactive API docs: <https://madeonsol.com/api-docs>.
@@ -704,6 +706,24 @@ returns the URL + token, and you connect with any WS library
 let token = client.stream.get_token().await?;
 let ws_url = format!("{}?token={}", token.ws_url, token.token);
 // then: tokio_tungstenite::connect_async(&ws_url).await
+# Ok(())
+# }
+```
+
+**Stream tokens do not expire** *(since 2026-08-27)*. `get_token()` returns the
+same token on every call — call it on every reconnect and never schedule a
+refresh: `expires_at` / `next_refresh_at` are always `None` (kept for wire
+compatibility only). The token stops working only when your subscription
+lapses, or when you replace it yourself with `client.stream.rotate_token()`
+(`POST /stream/token` with `{"rotate": true}`) — the old value then keeps
+working for 60 s so live sockets can reconnect. A WebSocket close code `4001`
+means "call `get_token()` again and reconnect", never "the token timed out".
+
+```rust
+# async fn run(client: madeonsol::MadeOnSol) -> Result<(), Box<dyn std::error::Error>> {
+// Only if a token leaked — there is no reason to rotate on a schedule.
+let fresh = client.stream.rotate_token().await?;
+assert_eq!(fresh.rotated, Some(true));
 # Ok(())
 # }
 ```

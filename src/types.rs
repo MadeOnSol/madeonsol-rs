@@ -5103,12 +5103,38 @@ pub struct ToolsSearchResponse {
 
 // ─── Streaming ──────────────────────────────────────────────────────────────
 
+/// Your WebSocket streaming token, as returned by
+/// [`Stream::get_token`](crate::api::stream::Stream::get_token) and
+/// [`Stream::rotate_token`](crate::api::stream::Stream::rotate_token).
+///
+/// **Stream tokens do not expire** (since 2026-08-27). `get_token` returns the
+/// same value on every call; it only stops working when your subscription
+/// lapses or you explicitly rotate it (`{"rotate": true}` — the previous value
+/// then stays valid for 60 s so live sockets can reconnect). A WebSocket close
+/// code `4001` means "mint a new token", never "the timer ran out".
 #[derive(Debug, Clone, Deserialize)]
 pub struct StreamToken {
     pub token: String,
-    pub expires_at: String,
+    /// Always `None` since 2026-08-27 — stream tokens do not expire; kept for
+    /// wire compatibility. Do not schedule refreshes on it.
+    #[serde(default)]
+    pub expires_at: Option<String>,
+    /// Always `None` since 2026-08-27 — stream tokens do not expire; kept for
+    /// wire compatibility.
     #[serde(default)]
     pub next_refresh_at: Option<String>,
+    /// `Some(true)` when this call replaced an existing token (a
+    /// `{"rotate": true}` request — see
+    /// [`Stream::rotate_token`](crate::api::stream::Stream::rotate_token));
+    /// `Some(false)` when the existing token was returned unchanged or was
+    /// minted for the first time. `None` from servers older than 2026-08-27.
+    #[serde(default)]
+    pub rotated: Option<bool>,
+    /// Human-readable lifetime statement from the server: the token does not
+    /// expire, is identical on every call, and dies only on subscription lapse
+    /// or an explicit rotation. `None` from servers older than 2026-08-27.
+    #[serde(default)]
+    pub lifetime: Option<String>,
     pub ws_url: String,
     /// Only present for ULTRA-tier subscribers.
     #[serde(default)]
