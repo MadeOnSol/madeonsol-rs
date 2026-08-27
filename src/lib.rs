@@ -189,4 +189,35 @@ mod tests {
         // Smoke test — namespaces exist and the client clones cheaply.
         let _cloned = client.clone();
     }
+
+    /// Regression: since 2026-08-27 `POST /stream/token` returns
+    /// `expires_at: null` / `next_refresh_at: null` (stream tokens never
+    /// expire) plus `rotated` / `lifetime`. 0.26.0's
+    /// `expires_at: String` refused that body, so `get_token()` errored for
+    /// every caller.
+    #[test]
+    fn stream_token_deserializes_null_expiry() {
+        let t: crate::types::StreamToken = serde_json::from_str(
+            r#"{"token":"abc","expires_at":null,"next_refresh_at":null,"rotated":false,
+                "lifetime":"This token does not expire.",
+                "ws_url":"wss://madeonsol.com/ws/v1/stream","usage":"connect"}"#,
+        )
+        .unwrap();
+        assert_eq!(t.token, "abc");
+        assert!(t.expires_at.is_none());
+        assert!(t.next_refresh_at.is_none());
+        assert_eq!(t.rotated, Some(false));
+        assert!(t.lifetime.is_some());
+        assert!(t.dex_ws_url.is_none());
+
+        // Pre-2026-08-27 servers sent a timestamp and omitted the new fields.
+        let old: crate::types::StreamToken = serde_json::from_str(
+            r#"{"token":"abc","expires_at":"2026-08-28T00:00:00Z",
+                "ws_url":"wss://madeonsol.com/ws/v1/stream","usage":"connect"}"#,
+        )
+        .unwrap();
+        assert_eq!(old.expires_at.as_deref(), Some("2026-08-28T00:00:00Z"));
+        assert!(old.rotated.is_none());
+        assert!(old.lifetime.is_none());
+    }
 }
