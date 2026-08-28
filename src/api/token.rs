@@ -300,6 +300,44 @@ impl Token {
         self.core.get("/tokens/fee-claims", params).await
     }
 
+    /// v0.27 — Token momentum fires, newest first (`GET /tokens/surges`, PRO+).
+    ///
+    /// Two [`SurgeKind`]s. **`Surge`** — a token < 30 min old whose market cap
+    /// runs hard vs its LAUNCH MC: [`SurgeTier::Early`] (≤ 10 min, ≥ $12k,
+    /// ≥ 3× launch MC), `Strong` (≤ 30 min, ≥ $30k, ≥ 6× launch AND ≥ 2× the
+    /// lowest sample of the last 3 min — it is climbing now), `Breakout`
+    /// (≤ 2 min, ≥ $45k, ≥ 8×). Each tier fires at most once per mint and
+    /// must be SUSTAINED (floor + multiple hold on the current tick and on a
+    /// sample ≥ 10 s older; nothing fires before 20 s of age — a one-tick
+    /// mark is a spike, not a surge). **`Revival`** — a token with no
+    /// 1-minute trade candle for ≥ 24 h that started trading again,
+    /// CONFIRMED by the tape (≥ 5 buys, ≥ $500 buy volume, MC ≥ 1.5× the
+    /// pre-dormancy close — or ≥ 20 buys / ≥ $5k regardless), never by the
+    /// price mark alone. Hard gates on both: liquidity ≥ $1.5k and ≥ 2% of
+    /// MC when known, MC ≤ $100B, and the MC gained must be PAID FOR (buy
+    /// volume ≥ 3% of the move — a spoof-pool mark moves MC on ~$0).
+    ///
+    /// Every [`TokenSurgeEvent`] carries [`SurgeTape`] (buys / sells / volume
+    /// since birth or revival; `unique_buyers` only when the mint is in
+    /// wallet-trade coverage — `wallet_data_available: false` otherwise,
+    /// never an inferred zero), [`SurgeKol`], [`SurgeEarlyBuyers`] (first-20
+    /// cohort: bundled / sold / sniper wallets), [`SurgeDeployer`] and
+    /// `risk_flags` ([`SurgeRiskFlag`]) — the honest half. Rows ≥ 65 min old
+    /// also carry [`SurgeOutcome`] (`priced_after_1h: false` = no candle in
+    /// the hour, not zero) and `stats: Some(true)` returns per-(kind, tier)
+    /// hit-rates ([`SurgeStats`]) over `days` — out-of-sample by
+    /// construction. The live thresholds are echoed in `definitions`. Poll
+    /// forward with `pagination.next_since` → [`TokenSurgesParams::since`],
+    /// or subscribe to the **`token:surges`** WebSocket channel (events
+    /// `token:surge` / `token:revival`, payload [`TokenSurgeStreamEvent`];
+    /// subscribe filters `kinds[]`, `tiers[]`, `launchpads[]`,
+    /// `exclude_flags[]`, `min_mc_usd` / `max_mc_usd`, `deployer_tier[]` —
+    /// [`SurgeSubscribeFilters`]). Nearly every scalar is an `Option` —
+    /// `None` means unknown, never zero. Keyed API only; BASIC gets 403.
+    pub async fn surges(&self, params: &TokenSurgesParams) -> Result<TokenSurgesResponse> {
+        self.core.get("/tokens/surges", params).await
+    }
+
     /// v0.15 — 1-minute OHLC candles for a token, aggregated from the trade
     /// firehose. Returns open/high/low/close, USD volume, trade count, and
     /// market cap per bar. ULTRA unlocks buy/sell volume split, net flow,

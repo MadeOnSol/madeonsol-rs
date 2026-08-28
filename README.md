@@ -20,6 +20,8 @@ async, `tokio`-based, `rustls`-only.
 >
 > **This is the keyed REST SDK** — authenticate with an API key (`msk_…`). It covers the full endpoint surface (KOL intelligence, deployer intel, token risk/buyer-quality/bundle, Signal Scorecard, wallet PnL, DEX firehose). Want **x402 pay-per-call** instead — no signup, your agent's wallet pays per request in USDC? Use the TypeScript [`madeonsol-x402`](https://www.npmjs.com/package/madeonsol-x402) or Python [`madeonsol-x402`](https://pypi.org/project/madeonsol-x402/) clients.
 
+> **New in 0.27.0 — token surges & revivals: momentum fires with the honest half attached.** One keyed (PRO+) method + one WebSocket channel. `client.token.surges(&TokenSurgesParams)` (`GET /tokens/surges`, typed `TokenSurgesResponse`) — `SurgeKind::Surge` = a token < 30 min old whose MC runs hard vs its *launch* MC (`SurgeTier::Early` ≤ 10 min / ≥ $12k / ≥ 3×, `Strong` ≤ 30 min / ≥ $30k / ≥ 6× and still climbing, `Breakout` ≤ 2 min / ≥ $45k / ≥ 8× — each fires once per mint, and only when SUSTAINED across ≥ 10 s, never on a one-tick mark); `SurgeKind::Revival` = a token with no trade candle for ≥ 24 h that started trading again, confirmed by real buys + buy volume on the tape, never by the price move alone. Hard gates on both: liquidity ≥ $1.5k and ≥ 2 % of MC, and the MC gained must be *paid for* (buy volume ≥ 3 % of the move — a spoof-pool mark moves MC on ~$0). Every `TokenSurgeEvent` carries `SurgeTape` (buys / sells / volume; `unique_buyers` only where wallet data exists — `wallet_data_available: false` otherwise, never inferred), `SurgeKol`, `SurgeEarlyBuyers` (bundled / sold / sniper wallets), `SurgeDeployer` and `risk_flags: Vec<SurgeRiskFlag>` (`BundledLaunch`, `FewBuyers`, `WashPattern`, `ThinLiquidity`, `ColdDeployer`, `SniperHeavy`, `EarlyBuyersExiting`, `SellPressure`, `NoTapeTrades`, `NoPriorPrice`, `MintAuthorityActive`, `TransferFee`); rows ≥ 65 min old carry the +1 h `SurgeOutcome` (`mc_1h_multiple`, `peak_1h_multiple`, `priced_after_1h`) and `stats: Some(true)` returns per-(kind, tier) hit-rates (`SurgeStats`) — out-of-sample by construction. Filters `kind`, `tier`, `mint`, `launchpad`, `deployer_tier`, `min_mc_usd` / `max_mc_usd`, `min_buys`, `exclude_flags`, `only_clean`; cursors `since` / `before`. Stream: `token:surges` (events `token:surge` / `token:revival`, payload `TokenSurgeStreamEvent`; subscribe filters `SurgeSubscribeFilters`: `kinds`, `tiers`, `launchpads`, `exclude_flags`, `min_mc_usd` / `max_mc_usd`, `deployer_tier`). **Nearly every scalar is an `Option`** with `#[serde(default)]` — `None` means unknown, never zero, and an older or newer server never breaks deserialization. **Keyed (`msk_`) API only — not on the x402 rail; BASIC gets HTTP 403.**
+
 > **New in 0.26.1 — fix: stream tokens never expire, and `StreamToken` deserializes again.** Since 2026-08-27 `POST /stream/token` returns the SAME token on every call and it never expires — it stops working only if your subscription lapses or you replace it with `{"rotate": true}` (the old value keeps working for 60 s). The API now sends `expires_at: null` and `next_refresh_at: null`, which 0.26.0's `StreamToken { expires_at: String }` refused to deserialize, so `client.stream.get_token()` errored for every caller. **`StreamToken.expires_at` is now `Option<String>`** (always `None`; kept for wire compatibility — do not schedule refreshes on it), `next_refresh_at` stays `Option<String>` (always `None`), and two fields are new: `rotated: Option<bool>` (`Some(true)` when the call replaced an existing token) and `lifetime: Option<String>` (the server's plain-English statement of the above). New method **`client.stream.rotate_token()`** sends `{"rotate": true}` for the leaked-token case. A WebSocket close code `4001` means "call `get_token()` again and reconnect", never "the token timed out".
 
 > **New in 0.26.0 — token locks & vesting, upcoming unlocks, and pump.fun creator-fee sharing.** Five keyed (PRO+) methods on `client.token` + two WebSocket channels. `token.locks(mint, &TokenLocksParams)` (`GET /tokens/{mint}/locks`, typed `TokenLocksResponse`) — every on-chain Streamflow / Jupiter Lock / Bonfida vesting contract on a mint with the schedule (start / cliff / period / end), the terms (`cancelable_by_sender` — a cancelable lock is a weaker promise — `cancelable_by_recipient`, `transferable`, `can_topup`) and a live-derived view (`locked_raw` now, `unlocked`, `withdrawn`, `claimable`, `LockStatus`, `next_unlock`), plus a `TokenLocksSummary` (exact `lock_count`, `distinct_lockers`, locked / deposited raw + ui + usd + % of supply, `unlocking_7d_*` / `unlocking_30d_*`, nearest `next_unlock`, `active_cancelable_by_sender`). `token.locks_feed(&TokenLocksFeedParams)` (`GET /tokens/locks`) — cross-token feed of NEW contracts, newest first, `since` / `before` cursors from `pagination.next_since` / `next_before`. `token.unlocks(&TokenUnlocksParams)` (`GET /tokens/unlocks`) — upcoming unlock EVENTS (`UnlockEventKind`: cliff / period / final / tranche) inside `UnlockWindow` `1h`…`90d` with `amount_*` and `window_amount_*`, sorted by `UnlocksSort`. **LP locks are NOT included** in any of the three. `token.fee_shares(mint)` (`GET /tokens/{mint}/fee-shares`, typed `TokenFeeSharesResponse`) — the pump.fun `SharingConfig`: who receives what share (bps) of a coin's creator fees, `is_admin` / `is_social_pda` (fees earmarked for an X account etc. — `FeeShareSocial::platform` 2 = X, `user_id` = the platform-native numeric id), `redirected_bps`, `social_bps`, `is_default: Some(true)` = 100% to the creator, plus the `FeeDistributions` rollup and config `history`. `token.fee_claims(&TokenFeeClaimsParams)` (`GET /tokens/fee-claims`) — the fee-event feed (`FeeEventType`: `Distribution` with `payouts`, `SocialClaim`, `SharesCreated` / `SharesUpdated` / `SharesReset`, `CreatorTransferred`; `CreatorClaim` only when asked via `event_type`). **Fee history starts 2026-08-17.** Every base-unit amount (`*_raw`) is a **`String`**; ui / usd / pct companions are `Option` and `None` when decimals or price are unknown. Streams: `token:locks` (event `token:lock`, payload `TokenLockEvent`, one frame per NEW contract) and `token:fee_claims` (event `token:fee_claim`, payload `TokenFeeClaimEvent`). **Keyed (`msk_`) API only — none of these are on the x402 rail; BASIC gets HTTP 403.**
@@ -79,7 +81,7 @@ Annual: PRO €430/yr, ULTRA €1,310/yr, BUSINESS €4,000/yr (2 months free). 
 
 ```toml
 [dependencies]
-madeonsol = "0.26"
+madeonsol = "0.27"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -129,7 +131,7 @@ The `MadeOnSol` client exposes namespaced sub-clients:
 | `client.kol` | KOL feed, leaderboard, coordination, PnL, trending tokens, alerts, compare, **first_touches**, **scout_leaderboard**, **coordination_history** |
 | `client.deployer` | Pump.fun deployer leaderboard, alerts, trajectory (+ daily snapshots), **history**, bonded tokens |
 | `client.alpha` | Alpha-wallet leaderboard, profiles, cap tables, buyer quality |
-| `client.token` | Per-mint snapshot, batch lookup, buyer quality, **kol_consensus**, **peak_history**, **risk** (+ `dev` block, 0.23), **batch_risk**, **bundle**, **pools**, **locks** / **locks_feed** / **unlocks** *(new 0.26 — token locks & vesting, upcoming unlocks; LP locks not included)*, **fee_shares** / **fee_claims** *(new 0.26 — pump.fun creator-fee sharing + fee-claim feed)*, **holders** *(new 0.25 — live holder census + concentration)*, **depth** *(new 0.23 — per-pool price impact)*, **candles**, **token_flow**, **trades** *(new 0.22 — mint-scoped trade tape)*, **almost_bonded**, directory list |
+| `client.token` | Per-mint snapshot, batch lookup, buyer quality, **kol_consensus**, **peak_history**, **risk** (+ `dev` block, 0.23), **batch_risk**, **bundle**, **pools**, **surges** *(new 0.27 — token surges & revivals: momentum fires with tape / KOL / early-buyer / deployer context, `risk_flags`, +1 h outcome + hit-rate stats)*, **locks** / **locks_feed** / **unlocks** *(new 0.26 — token locks & vesting, upcoming unlocks; LP locks not included)*, **fee_shares** / **fee_claims** *(new 0.26 — pump.fun creator-fee sharing + fee-claim feed)*, **holders** *(new 0.25 — live holder census + concentration)*, **depth** *(new 0.23 — per-pool price impact)*, **candles**, **token_flow**, **trades** *(new 0.22 — mint-scoped trade tape)*, **almost_bonded**, directory list |
 | `client.wallet_tracker` | Track arbitrary Solana wallets — watchlist CRUD, swap/transfer history |
 | `client.wallet` | Universal wallet endpoints — stats + cross-product flags + derived analytics, FIFO PnL, open positions, paginated trades, **batch_classify** *(new 0.22 — bulk reputation flags, 1–100 wallets)* (PRO+), verified on-chain holdings (ULTRA) |
 | `client.coordination_alerts` | Push alerts on coordinated buying (PRO/ULTRA) |
@@ -438,6 +440,103 @@ for t in res.tokens {
 # }
 ```
 
+## Token surges & revivals *(new in 0.27)*
+
+`client.token.surges(&TokenSurgesParams)` (`GET /tokens/surges`, PRO+) —
+token **momentum fires**, newest first. Two `SurgeKind`s:
+
+- **`Surge`** — a token < 30 min old whose market cap runs hard vs its
+  *launch* MC. `SurgeTier::Early` (≤ 10 min, ≥ $12k, ≥ 3× launch MC),
+  `Strong` (≤ 30 min, ≥ $30k, ≥ 6× launch **and** ≥ 2× the lowest sample of
+  the last 3 min — it is climbing *now*), `Breakout` (≤ 2 min, ≥ $45k, ≥ 8×).
+  Each tier fires at most once per mint; tiers are independent. A tier must
+  be **sustained** — floor + multiple hold on the current tick *and* on a
+  sample ≥ 10 s older, and nothing fires before 20 s of age: a one-tick mark
+  (same-slot bundle, routed dust) is a spike, not a surge. When the engine
+  first saw the token late (`baseline_source: Late`) the launch multiple is
+  not applied — USD floor + velocity only.
+- **`Revival`** — a token with **no 1-minute trade candle for ≥ 24 h** that
+  starts trading again, confirmed **only by the tape** (≥ 5 buys, ≥ $500 buy
+  volume, MC ≥ 1.5× the pre-dormancy close — or ≥ 20 buys / ≥ $5k
+  regardless), never by the price mark: a single dust buy into an empty pool
+  marks MC up 300 % and is not a revival. One fire per dormancy episode
+  (24 h re-fire guard).
+
+**Hard gates on both kinds** (not flags): liquidity ≥ $1.5k *and* ≥ 2 % of
+MC when known, MC ≤ $100B, and the MC gained must be **paid for** — buy
+volume on the tape ≥ 3 % × (MC − launch / pre-dormancy MC); a price mark in
+a spoof pool moves MC on ~$0 of volume.
+
+Every `TokenSurgeEvent` carries `SurgeTape` (buys / sells / volume since
+birth or revival; `source` = `Candles` or `WalletTrades`, `available: false`
+with `None`s while no tape covers the window yet; `unique_buyers` /
+`trades_per_wallet` only when the mint is in wallet-trade coverage —
+`wallet_data_available: false` otherwise, **never an inferred zero**),
+`SurgeKol`, `SurgeEarlyBuyers` (first-20 cohort: bundled, cohort SOL, sold,
+sniper wallets), `SurgeDeployer` and `risk_flags: Vec<SurgeRiskFlag>` — the
+honest half. Rows ≥ 65 min old carry `SurgeOutcome` (`mc_usd_1h_after`,
+`peak_mc_usd_1h_after`, `low_mc_usd_1h_after`, `mc_1h_multiple`,
+`peak_1h_multiple`, `priced_after_1h` — `false` = no candle in the hour, not
+zero); `stats: Some(true)` adds `SurgeStats` — per-(kind, tier) hit-rates
+over `days` (`up_1h_pct`, `median_peak_multiple`, `doubled_1h_pct`),
+out-of-sample by construction. The live thresholds are echoed in
+`definitions` (untyped `serde_json::Value`, read from the engine so they
+cannot drift). Poll forward with `pagination.next_since` → `since`, or
+subscribe to WS `token:surges` (events `token:surge` / `token:revival`,
+payload `TokenSurgeStreamEvent` — the same object with `outcome: None`;
+`SurgeSubscribeFilters` serialises the server-side filter object).
+
+Nearly every scalar is an `Option` with `#[serde(default)]` — `None` means
+unknown, never zero. `tier` is `None` on revivals; `dormant_hours` /
+`prev_mc_usd` / `mc_vs_prev_multiple` are `None` on surges; `baseline_*` /
+`mc_multiple` / `mc_change_3m_pct` are `None` on revivals. `tier` together
+with `kind: Revival` is a 400; an unknown name in `exclude_flags` is a 400
+with `known_flags[]`. **Keyed API only — BASIC gets HTTP 403.**
+
+```rust
+# async fn run(client: madeonsol::MadeOnSol) -> Result<(), Box<dyn std::error::Error>> {
+use madeonsol::types::{SurgeKind, SurgeRiskFlag, SurgeTier, TokenSurgesParams};
+
+let exclude = [SurgeRiskFlag::BundledLaunch, SurgeRiskFlag::SniperHeavy]
+    .iter().map(|f| f.as_str()).collect::<Vec<_>>().join(",");
+let res = client.token.surges(&TokenSurgesParams {
+    kind: Some(SurgeKind::Surge),
+    tier: Some(SurgeTier::Strong),
+    exclude_flags: Some(exclude),
+    stats: Some(true),
+    limit: Some(20),
+    ..Default::default()
+}).await?;
+
+for e in &res.events {
+    println!(
+        "{:?} {:?} mc={:?} {:?}x launch buys={:?} buyers={:?} flags={:?} peak1h={:?}",
+        e.symbol, e.tier, e.market_cap_usd, e.mc_multiple, e.tape.buys, e.tape.unique_buyers,
+        e.risk_flags, e.outcome.as_ref().and_then(|o| o.peak_1h_multiple),
+    );
+}
+if let Some(stats) = &res.stats {
+    for r in &stats.rows {
+        println!("{:?} {:?}: {:?}% up after 1h, median peak {:?}x ({} fires)", r.kind, r.tier, r.up_1h_pct, r.median_peak_multiple, r.with_outcome);
+    }
+}
+# Ok(())
+# }
+```
+
+Params: `kind`, `tier` (surge only), `mint`, `since` / `before` (ISO
+cursors), `min_mc_usd` / `max_mc_usd`, `min_buys`, `launchpad`,
+`deployer_tier` (`SurgeDeployerTier`), `exclude_flags` (comma list —
+build it with `SurgeRiskFlag::as_str`), `only_clean`, `stats`, `days`
+(1–30, default 7), `limit` (1–200, default 50).
+
+New types: `TokenSurgesParams`, `TokenSurgesResponse`, `TokenSurgeEvent`,
+`TokenSurgeStreamEvent`, `SurgeTape`, `SurgeKol`, `SurgeEarlyBuyers`,
+`SurgeDeployer`, `SurgeOutcome`, `SurgeStats`, `SurgeStatsRow`,
+`SurgeFilters`, `SurgeSubscribeFilters`, `SurgeKind`, `SurgeTier`,
+`SurgeBirthSource`, `SurgeBaselineSource`, `SurgeTapeSource`,
+`SurgeDeployerTier`, `SurgeRiskFlag`.
+
 ## Token locks, unlocks & pump.fun fee sharing *(new in 0.26)*
 
 Five keyed (PRO+) methods on `client.token`. All base-unit amounts (`*_raw`)
@@ -728,7 +827,7 @@ assert_eq!(fresh.rotated, Some(true));
 # }
 ```
 
-Channels: `kol:trades`, `kol:coordination`, `kol:first_touches`, `deployer:alerts`, `wallet_tracker:events`, `copytrade:signals`, `price_alert:events`, `sniper:deploys`, `token:graduations` (`GraduationEvent`), `token:prices` (mint-scoped price / MC ticks), `token:locks` *(new 0.26 — event `token:lock`, `TokenLockEvent`: every NEW lock / vesting contract; LP locks not included)*, `token:fee_claims` *(new 0.26 — event `token:fee_claim`, `TokenFeeClaimEvent`: every pump.fun fee event; history starts 2026-08-17)*. All PRO+.
+Channels: `kol:trades`, `kol:coordination`, `kol:first_touches`, `deployer:alerts`, `wallet_tracker:events`, `copytrade:signals`, `price_alert:events`, `sniper:deploys`, `token:graduations` (`GraduationEvent`), `token:prices` (mint-scoped price / MC ticks), `token:locks` *(new 0.26 — event `token:lock`, `TokenLockEvent`: every NEW lock / vesting contract; LP locks not included)*, `token:fee_claims` *(new 0.26 — event `token:fee_claim`, `TokenFeeClaimEvent`: every pump.fun fee event; history starts 2026-08-17)*, `token:surges` *(new 0.27 — events `token:surge` / `token:revival`, `TokenSurgeStreamEvent`: momentum fires with tape / KOL / early-buyer / deployer context and `risk_flags`; server-side filters `kinds`, `tiers`, `launchpads`, `exclude_flags`, `min_mc_usd` / `max_mc_usd`, `deployer_tier` — `SurgeSubscribeFilters`; the +1 h `outcome` is REST-only)*. All PRO+.
 
 The DEX firehose URL (`token.dex_ws_url`) is only present for ULTRA subscribers.
 See <https://madeonsol.com/api-docs> for the full subscribe/unsubscribe protocol.

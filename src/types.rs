@@ -3812,6 +3812,578 @@ pub struct TokenFeeClaimEvent {
     pub shareholders: Option<serde_json::Value>,
 }
 
+// ─── Token surges & revivals (/tokens/surges, WS token:surges) — v0.27 ───
+
+/// Kind of momentum fire. `Surge` = a token < 30 min old running hard vs its
+/// launch MC; `Revival` = a token dormant ≥ 24 h that started trading again
+/// (confirmed by real buys on the tape, never by a price mark). `Other`
+/// catches kinds added after this crate shipped.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SurgeKind {
+    Surge,
+    Revival,
+    #[serde(other)]
+    Other,
+}
+
+impl SurgeKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Surge => "surge",
+            Self::Revival => "revival",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// Surge tier — each fires at most once per mint; tiers are independent (a
+/// token can go straight to `Breakout`). Revivals carry no tier (`None`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SurgeTier {
+    /// ≤ 10 min old, ≥ $12k, ≥ 3× launch MC.
+    Early,
+    /// ≤ 30 min old, ≥ $30k, ≥ 6× launch MC AND ≥ 2× the lowest sample of
+    /// the last 3 min — it is climbing now.
+    Strong,
+    /// ≤ 2 min old, ≥ $45k, ≥ 8× launch MC.
+    Breakout,
+    #[serde(other)]
+    Other,
+}
+
+impl SurgeTier {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Early => "early",
+            Self::Strong => "strong",
+            Self::Breakout => "breakout",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// How the token's birth was established: `Sniper` = pre-confirm pump.fun
+/// deploy (deshred), `Deployer` = confirmed on-chain create, `FirstSeen` =
+/// the first trade the firehose observed (credible as a launch only on a
+/// launchpad curve).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SurgeBirthSource {
+    Sniper,
+    Deployer,
+    FirstSeen,
+    #[serde(other)]
+    Other,
+}
+
+/// `Launch` = the baseline is the first MC sample after birth (≤ 90 s);
+/// `Late` = the engine first saw the token later (restart mid-life) — the
+/// launch multiple is then NOT applied, USD floor + velocity only.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SurgeBaselineSource {
+    Launch,
+    Late,
+    #[serde(other)]
+    Other,
+}
+
+/// What the burst tape was measured on: 1-minute `Candles` (every DEX we
+/// price) or live `WalletTrades` rows (pump-pipeline mints — used while the
+/// open minute candle has not landed yet).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SurgeTapeSource {
+    Candles,
+    WalletTrades,
+    #[serde(other)]
+    Other,
+}
+
+/// Deployer reputation tier as carried on a fire (`Unranked` = no score yet).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SurgeDeployerTier {
+    Elite,
+    Good,
+    Moderate,
+    Rising,
+    Cold,
+    Unranked,
+    #[serde(other)]
+    Other,
+}
+
+impl SurgeDeployerTier {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Elite => "elite",
+            Self::Good => "good",
+            Self::Moderate => "moderate",
+            Self::Rising => "rising",
+            Self::Cold => "cold",
+            Self::Unranked => "unranked",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// Risk flag a fire can carry — the honest half. Thresholds are echoed in
+/// `definitions.risk_flags` on the response. `Other` catches flags added
+/// after this crate shipped.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SurgeRiskFlag {
+    /// ≥ 3 of the first-20 early buyers bought in the same block (surge only).
+    BundledLaunch,
+    /// < 8 unique buyers where wallet data exists, else < 10 buys on the tape.
+    FewBuyers,
+    /// ≥ 4 trades per wallet across < 15 wallets.
+    WashPattern,
+    /// Liquidity < $3k or liquidity / MC < 3%.
+    ThinLiquidity,
+    /// Deployer tier = cold.
+    ColdDeployer,
+    /// ≥ 3 early buyers are known sniper wallets.
+    SniperHeavy,
+    /// ≥ 50% of a ≥ 5-wallet early cohort has sold.
+    EarlyBuyersExiting,
+    /// More sells than buys on the tape at fire time.
+    SellPressure,
+    /// The price moved but no tape covering the window holds a parsed swap —
+    /// real but unmeasured.
+    NoTapeTrades,
+    /// Revival with no pre-dormancy MC to compare against.
+    NoPriorPrice,
+    /// Mint authority not revoked.
+    MintAuthorityActive,
+    /// Token-2022 transfer fee > 0.
+    TransferFee,
+    #[serde(other)]
+    Other,
+}
+
+impl SurgeRiskFlag {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::BundledLaunch => "bundled_launch",
+            Self::FewBuyers => "few_buyers",
+            Self::WashPattern => "wash_pattern",
+            Self::ThinLiquidity => "thin_liquidity",
+            Self::ColdDeployer => "cold_deployer",
+            Self::SniperHeavy => "sniper_heavy",
+            Self::EarlyBuyersExiting => "early_buyers_exiting",
+            Self::SellPressure => "sell_pressure",
+            Self::NoTapeTrades => "no_tape_trades",
+            Self::NoPriorPrice => "no_prior_price",
+            Self::MintAuthorityActive => "mint_authority_active",
+            Self::TransferFee => "transfer_fee",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// The burst tape — trades since birth (surge) or since the revival minute.
+/// `available: false` = no tape covers the window yet (candle lag; every
+/// count is `None`). `unique_buyers` / `unique_wallets` /
+/// `trades_per_wallet` are `None` when the mint is outside wallet-trade
+/// coverage (`wallet_data_available: false`) — never inferred.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SurgeTape {
+    /// ISO 8601 start of the window.
+    #[serde(default)]
+    pub since: Option<String>,
+    #[serde(default)]
+    pub available: bool,
+    #[serde(default)]
+    pub source: Option<SurgeTapeSource>,
+    #[serde(default)]
+    pub buys: Option<i64>,
+    #[serde(default)]
+    pub sells: Option<i64>,
+    #[serde(default)]
+    pub trades: Option<i64>,
+    #[serde(default)]
+    pub buy_volume_usd: Option<f64>,
+    #[serde(default)]
+    pub sell_volume_usd: Option<f64>,
+    #[serde(default)]
+    pub volume_usd: Option<f64>,
+    #[serde(default)]
+    pub mev_volume_usd: Option<f64>,
+    #[serde(default)]
+    pub buy_sol: Option<f64>,
+    #[serde(default)]
+    pub sell_sol: Option<f64>,
+    #[serde(default)]
+    pub unique_buyers: Option<i64>,
+    #[serde(default)]
+    pub unique_wallets: Option<i64>,
+    #[serde(default)]
+    pub trades_per_wallet: Option<f64>,
+    #[serde(default)]
+    pub wallet_data_available: bool,
+}
+
+/// Tracked-KOL involvement on the tape (at most 10 `names`).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SurgeKol {
+    #[serde(default)]
+    pub buyers: i64,
+    #[serde(default)]
+    pub buys: i64,
+    #[serde(default)]
+    pub sells: i64,
+    #[serde(default)]
+    pub names: Vec<String>,
+}
+
+/// The first-20 early-buyer cohort at fire time.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SurgeEarlyBuyers {
+    #[serde(default)]
+    pub count: i64,
+    /// Bought in the same block as ≥ 2 other early buyers.
+    #[serde(default)]
+    pub bundled: i64,
+    #[serde(default)]
+    pub cohort_sol: Option<f64>,
+    /// Cohort wallets that have already sold.
+    #[serde(default)]
+    pub sold: i64,
+    /// Early buyers that are known sniper wallets.
+    #[serde(default)]
+    pub sniper_wallets: i64,
+}
+
+/// Deployer reputation as carried on a fire ([`TokenSurgeEvent::deployer`]
+/// is `None` when the deployer is unknown).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SurgeDeployer {
+    #[serde(default)]
+    pub wallet: Option<String>,
+    #[serde(default)]
+    pub tier: Option<SurgeDeployerTier>,
+    #[serde(default)]
+    pub bonding_rate: Option<f64>,
+    #[serde(default)]
+    pub total_bonded: Option<i64>,
+    #[serde(default)]
+    pub total_deployed: Option<i64>,
+    #[serde(default)]
+    pub runner_rate: Option<f64>,
+    #[serde(default)]
+    pub labeled_tokens: Option<i64>,
+    /// Last-10 outcome string, e.g. `"BDDBBDDDBD"` (B = bonded, D = dead).
+    #[serde(default)]
+    pub recent: Option<String>,
+}
+
+/// +1 h outcome, present on REST rows ≥ 65 min old (computed from candles
+/// every 10 min). `priced_after_1h: false` = no candle in the hour — the
+/// token stopped being priced, NOT zero. Never on the WebSocket event.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SurgeOutcome {
+    #[serde(default)]
+    pub computed_at: Option<String>,
+    #[serde(default)]
+    pub mc_usd_1h_after: Option<f64>,
+    #[serde(default)]
+    pub peak_mc_usd_1h_after: Option<f64>,
+    #[serde(default)]
+    pub low_mc_usd_1h_after: Option<f64>,
+    /// `mc_usd_1h_after ÷ market_cap_usd` at the fire.
+    #[serde(default)]
+    pub mc_1h_multiple: Option<f64>,
+    /// `peak_mc_usd_1h_after ÷ market_cap_usd` at the fire.
+    #[serde(default)]
+    pub peak_1h_multiple: Option<f64>,
+    #[serde(default)]
+    pub priced_after_1h: bool,
+}
+
+/// One momentum fire — a row of [`TokenSurgesResponse::events`] and, minus
+/// `outcome`, the payload of a `token:surge` / `token:revival` stream event
+/// (see [`TokenSurgeStreamEvent`]). Both kinds share one shape: `tier` is
+/// `None` on revivals; `dormant_hours` / `prev_mc_usd` /
+/// `mc_vs_prev_multiple` are `None` on surges; `baseline_*` / `mc_multiple`
+/// / `mc_change_3m_pct` are `None` on revivals. Nearly every scalar is an
+/// `Option` — `None` means unknown, never zero.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenSurgeEvent {
+    /// Row id. Always set on REST rows; may be `None` on a stream frame.
+    #[serde(default)]
+    pub id: Option<i64>,
+    pub kind: SurgeKind,
+    #[serde(default)]
+    pub tier: Option<SurgeTier>,
+    pub mint: String,
+    #[serde(default)]
+    pub symbol: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Venue at birth / classification (what the first_seen rule was judged on).
+    #[serde(default)]
+    pub launchpad: Option<String>,
+    /// Where it trades at fire time — a pump token that graduated is
+    /// `pumpfun` / `pumpswap`.
+    #[serde(default)]
+    pub primary_dex: Option<String>,
+    /// ISO 8601.
+    pub fired_at: String,
+    #[serde(default)]
+    pub birth_at: Option<String>,
+    #[serde(default)]
+    pub birth_source: Option<SurgeBirthSource>,
+    #[serde(default)]
+    pub age_seconds: Option<i64>,
+    #[serde(default)]
+    pub market_cap_usd: Option<f64>,
+    #[serde(default)]
+    pub liquidity_usd: Option<f64>,
+    #[serde(default)]
+    pub liquidity_to_mc_ratio: Option<f64>,
+    #[serde(default)]
+    pub price_usd: Option<f64>,
+    /// Surge only: launch MC (`baseline_source: Launch`).
+    #[serde(default)]
+    pub baseline_mc_usd: Option<f64>,
+    #[serde(default)]
+    pub baseline_source: Option<SurgeBaselineSource>,
+    /// Surge only: `market_cap_usd ÷ baseline_mc_usd`; `None` when the
+    /// baseline is `Late`.
+    #[serde(default)]
+    pub mc_multiple: Option<f64>,
+    /// Surge only: climb vs the lowest sample of the last 3 min, in percent.
+    #[serde(default)]
+    pub mc_change_3m_pct: Option<f64>,
+    /// Revival only.
+    #[serde(default)]
+    pub dormant_hours: Option<f64>,
+    /// Revival only: pre-dormancy candle close MC.
+    #[serde(default)]
+    pub prev_mc_usd: Option<f64>,
+    /// Revival only: `market_cap_usd ÷ prev_mc_usd`.
+    #[serde(default)]
+    pub mc_vs_prev_multiple: Option<f64>,
+    #[serde(default)]
+    pub peak_mc_usd: Option<f64>,
+    #[serde(default)]
+    pub pct_of_peak: Option<f64>,
+    #[serde(default)]
+    pub bonding_progress_pct: Option<f64>,
+    #[serde(default)]
+    pub is_bonded: Option<bool>,
+    #[serde(default)]
+    pub tape: SurgeTape,
+    #[serde(default)]
+    pub kol: SurgeKol,
+    #[serde(default)]
+    pub early_buyers: SurgeEarlyBuyers,
+    /// `None` when the deployer is unknown.
+    #[serde(default)]
+    pub deployer: Option<SurgeDeployer>,
+    /// Flat copies of `deployer.wallet` / `deployer.tier` (what the
+    /// subscribe filter reads).
+    #[serde(default)]
+    pub deployer_wallet: Option<String>,
+    #[serde(default)]
+    pub deployer_tier: Option<SurgeDeployerTier>,
+    #[serde(default)]
+    pub mint_authority_revoked: Option<bool>,
+    #[serde(default)]
+    pub freeze_authority_revoked: Option<bool>,
+    #[serde(default)]
+    pub is_token_2022: Option<bool>,
+    /// Unknown flags (added after this crate shipped) deserialize as
+    /// [`SurgeRiskFlag::Other`].
+    #[serde(default)]
+    pub risk_flags: Vec<SurgeRiskFlag>,
+    #[serde(default)]
+    pub detail_url: Option<String>,
+    /// `Some(false)` when the one-round-trip enrichment failed (tape / kol /
+    /// early_buyers then carry zeros / `None`s).
+    #[serde(default)]
+    pub enrichment_available: Option<bool>,
+    /// REST only — `None` until the fire is ≥ 65 min old.
+    #[serde(default)]
+    pub outcome: Option<SurgeOutcome>,
+}
+
+/// Payload of a `token:surge` / `token:revival` stream event (channel
+/// `token:surges`, PRO+) — pushed by the surge-tracker the moment a fire is
+/// confirmed. The same shape as the REST row; `outcome` is always `None`
+/// on the stream (poll [`Token::surges`](crate::api::token::Token::surges)
+/// for it once the fire is ≥ 65 min old).
+pub type TokenSurgeStreamEvent = TokenSurgeEvent;
+
+/// Query params for [`Token::surges`](crate::api::token::Token::surges).
+/// Unset fields are omitted from the query string.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TokenSurgesParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<SurgeKind>,
+    /// Surge only — the API answers 400 with `kind: Revival`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tier: Option<SurgeTier>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mint: Option<String>,
+    /// ISO 8601 — only fires after this instant (use `pagination.next_since`
+    /// to poll forward).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    /// ISO 8601 — page back: only fires before this instant (use
+    /// `pagination.next_before`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_mc_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_mc_usd: Option<f64>,
+    /// Buys on the tape at fire time ≥.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_buys: Option<u32>,
+    /// Launchpad at birth, e.g. `"pumpfun"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub launchpad: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployer_tier: Option<SurgeDeployerTier>,
+    /// Comma list of [`SurgeRiskFlag`] names (`"bundled_launch,sniper_heavy"`)
+    /// — rows carrying ANY of them are dropped; an unknown flag is a 400
+    /// with `known_flags[]`. Build it with [`SurgeRiskFlag::as_str`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exclude_flags: Option<String>,
+    /// Only rows with no risk flags at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub only_clean: Option<bool>,
+    /// Also return per-(kind, tier) hit-rates ([`SurgeStats`]) over `days`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stats: Option<bool>,
+    /// Stats window, 1–30; default 7.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub days: Option<u32>,
+    /// 1–200; default 50.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// One per-(kind, tier) hit-rate row of [`SurgeStats`]. Only fires ≥ 65 min
+/// old with a computed outcome count (`with_outcome`). Out-of-sample by
+/// construction — the fire is recorded before the outcome exists.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SurgeStatsRow {
+    pub kind: SurgeKind,
+    #[serde(default)]
+    pub tier: Option<SurgeTier>,
+    #[serde(default)]
+    pub fires: i64,
+    #[serde(default)]
+    pub with_outcome: i64,
+    /// MC one hour after the fire ≥ MC at the fire.
+    #[serde(default)]
+    pub up_1h: i64,
+    #[serde(default)]
+    pub up_1h_pct: Option<f64>,
+    #[serde(default)]
+    pub median_peak_multiple: Option<f64>,
+    #[serde(default)]
+    pub p75_peak_multiple: Option<f64>,
+    #[serde(default)]
+    pub median_mc_1h_multiple: Option<f64>,
+    #[serde(default)]
+    pub doubled_1h: i64,
+    #[serde(default)]
+    pub doubled_1h_pct: Option<f64>,
+}
+
+/// Per-(kind, tier) hit-rates returned with `stats: Some(true)`.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SurgeStats {
+    #[serde(default)]
+    pub days: i64,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub rows: Vec<SurgeStatsRow>,
+}
+
+/// Echo of the filters a [`TokenSurgesResponse`] was served with.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SurgeFilters {
+    #[serde(default)]
+    pub kind: Option<SurgeKind>,
+    #[serde(default)]
+    pub tier: Option<SurgeTier>,
+    #[serde(default)]
+    pub mint: Option<String>,
+    #[serde(default)]
+    pub launchpad: Option<String>,
+    #[serde(default)]
+    pub deployer_tier: Option<SurgeDeployerTier>,
+    #[serde(default)]
+    pub min_mc_usd: Option<f64>,
+    #[serde(default)]
+    pub max_mc_usd: Option<f64>,
+    #[serde(default)]
+    pub min_buys: Option<i64>,
+    #[serde(default)]
+    pub exclude_flags: Vec<String>,
+    #[serde(default)]
+    pub only_clean: bool,
+}
+
+/// `GET /tokens/surges` — token momentum fires (surges + revivals), newest
+/// first, each with the burst tape, KOL involvement, early-buyer cohort,
+/// deployer reputation, `risk_flags` and (≥ 65 min old) the +1 h `outcome`.
+/// Pushed live as `token:surge` / `token:revival` on the `token:surges`
+/// channel ([`TokenSurgeStreamEvent`]).
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenSurgesResponse {
+    #[serde(default)]
+    pub events: Vec<TokenSurgeEvent>,
+    pub pagination: TimeCursorPagination,
+    #[serde(default)]
+    pub filters: Option<SurgeFilters>,
+    /// Only with `stats: Some(true)`.
+    #[serde(default)]
+    pub stats: Option<SurgeStats>,
+    #[serde(default)]
+    pub stream: Option<StreamPointer>,
+    /// The live rule thresholds the response was produced under (`surge` /
+    /// `revival` / `shared` / `risk_flags` / `tiers`), read straight from the
+    /// engine — untyped, the block is documentation that cannot drift.
+    #[serde(default)]
+    pub definitions: Option<serde_json::Value>,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub meta: Option<serde_json::Value>,
+}
+
+/// Server-side subscribe filters for the `token:surges` WebSocket channel —
+/// serialise it as the `filters` object of the subscribe frame. `tiers`
+/// applies to surges only (revivals always pass it); `exclude_flags` drops a
+/// fire carrying ANY listed flag. Unset fields are omitted.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct SurgeSubscribeFilters {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kinds: Option<Vec<SurgeKind>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tiers: Option<Vec<SurgeTier>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub launchpads: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exclude_flags: Option<Vec<SurgeRiskFlag>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_mc_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_mc_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployer_tier: Option<Vec<SurgeDeployerTier>>,
+}
+
 // ─── Token OHLC candles (/tokens/{mint}/candles) ────────────────────────────
 
 /// Query params for [`Token::candles`](crate::api::token::Token::candles).
