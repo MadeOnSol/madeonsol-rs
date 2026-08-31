@@ -11,12 +11,13 @@
 Official Rust SDK for the **[MadeOnSol](https://madeonsol.com) Solana API** — typed,
 async, `tokio`-based, `rustls`-only.
 
-> Real-time Solana trading intelligence: track 1,000+ KOL wallets with <3s latency,
+> Real-time Solana trading intelligence: track 1,000+ KOL wallets with <3s latency
+> on paid keys and x402 pay-per-call (free-tier live feeds are 5-min delayed),
 > score 6,700+ Pump.fun deployers by reputation, detect multi-KOL coordination
 > signals, push every pump.fun graduation the second it bonds, verify any wallet's
 > current on-chain holdings, and stream every DEX trade across 9+ programs.
 >
-> **Free tier: 200 requests/day, every endpoint — no signup payment. Get a key at <https://madeonsol.com/pricing>.**
+> **Free tier: 200 requests/day across 40+ endpoints (live feeds 5-min delayed; paid tiers are real-time) — no signup payment. Get a key at <https://madeonsol.com/pricing>.**
 >
 > **This is the keyed REST SDK** — authenticate with an API key (`msk_…`). It covers the full endpoint surface (KOL intelligence, deployer intel, token risk/buyer-quality/bundle, Signal Scorecard, wallet PnL, DEX firehose). Want **x402 pay-per-call** instead — no signup, your agent's wallet pays per request in USDC? Use the TypeScript [`madeonsol-x402`](https://www.npmjs.com/package/madeonsol-x402) or Python [`madeonsol-x402`](https://pypi.org/project/madeonsol-x402/) clients.
 
