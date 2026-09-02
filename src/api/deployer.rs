@@ -121,4 +121,34 @@ impl Deployer {
             )
             .await
     }
+
+    /// v0.28 — A deployer's reputation exactly as it stood on `date` — the
+    /// latest write-on-change snapshot at or before it, so a backtest sees only
+    /// what was knowable then. `date` (YYYY-MM-DD, UTC) defaults to today when
+    /// `None`; nothing is ever synthesized — `response.as_of` is `false` and
+    /// `response.snapshot` is `None` before the deployer's first snapshot.
+    pub async fn as_of(
+        &self,
+        wallet: &str,
+        date: Option<&str>,
+    ) -> Result<DeployerAsOfResponse> {
+        self.core
+            .get(
+                &format!("/deployer-hunter/{}/as-of", wallet),
+                &DeployerAsOfParams {
+                    date: date.map(|d| d.to_string()),
+                },
+            )
+            .await
+    }
+
+    /// v0.28 — pump.fun creator-fee rewards for a wallet, answered two ways
+    /// that are never merged: `collected` (what actually reached the wallet)
+    /// and `attributed` (every payout on the tokens it deployed, split
+    /// `to_self`/`to_others`). Works for non-deployers too (`is_deployer: false`).
+    pub async fn rewards(&self, wallet: &str) -> Result<DeployerRewardsResponse> {
+        self.core
+            .get(&format!("/deployer-hunter/{}/rewards", wallet), &())
+            .await
+    }
 }

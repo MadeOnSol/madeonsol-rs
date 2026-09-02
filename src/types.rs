@@ -1879,6 +1879,199 @@ pub struct DeployerHistoryResponse {
     pub snapshots: Vec<DeployerSnapshot>,
 }
 
+// ─── Deployer as-of (/deployer-hunter/{wallet}/as-of) ─────────────────────────
+
+/// Query params for [`Deployer::as_of`](crate::api::deployer::Deployer::as_of).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct DeployerAsOfParams {
+    /// YYYY-MM-DD (UTC). Unset = today. Must be >= 2026-04-07 and not in the future.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
+}
+
+/// The reputation snapshot current on the requested date. `snapshot_date` can be
+/// earlier than `requested_date` (snapshots are write-on-change); `carried: true`
+/// means the state was recorded earlier and had not changed by then.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerAsOfSnapshot {
+    pub snapshot_date: String,
+    pub carried: bool,
+    #[serde(default)]
+    pub tier: Option<String>,
+    #[serde(default)]
+    pub is_tracked: Option<bool>,
+    #[serde(default)]
+    pub total_deployed: Option<i64>,
+    #[serde(default)]
+    pub total_bonded: Option<i64>,
+    #[serde(default)]
+    pub bonding_rate: Option<f64>,
+    #[serde(default)]
+    pub recent_bond_rate: Option<f64>,
+    #[serde(default)]
+    pub avg_peak_mc: Option<f64>,
+    #[serde(default)]
+    pub best_token_peak_mc: Option<f64>,
+    #[serde(default)]
+    pub captured_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerAsOfResponse {
+    pub is_deployer: bool,
+    pub wallet: String,
+    pub requested_date: String,
+    /// `true` when a snapshot at or before `requested_date` exists.
+    pub as_of: bool,
+    /// `None` when no snapshot exists at or before `requested_date` — nothing is
+    /// ever synthesized.
+    #[serde(default)]
+    pub snapshot: Option<DeployerAsOfSnapshot>,
+    #[serde(default)]
+    pub first_snapshot_date: Option<String>,
+    pub note: String,
+}
+
+// ─── Deployer creator-fee rewards (/deployer-hunter/{wallet}/rewards) ─────────
+
+/// `sol` / `usdc` are summed separately (never mixed); `usd` is `None` (not 0)
+/// when a SOL amount exists and no SOL price was available.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerRewardsMoney {
+    pub sol: f64,
+    pub usdc: f64,
+    #[serde(default)]
+    pub usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerRewardsRail {
+    pub sol: f64,
+    pub usdc: f64,
+    #[serde(default)]
+    pub usd: Option<f64>,
+    pub count: i64,
+    #[serde(default)]
+    pub first_at: Option<String>,
+    #[serde(default)]
+    pub last_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerRewardsDirectClaims {
+    #[serde(flatten)]
+    pub rail: DeployerRewardsRail,
+    pub window_days: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerRewardsSharePayouts {
+    #[serde(flatten)]
+    pub rail: DeployerRewardsRail,
+    pub tokens: i64,
+    pub on_own_tokens: DeployerRewardsMoney,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerRewardsCollected {
+    pub sol: f64,
+    pub usdc: f64,
+    #[serde(default)]
+    pub usd: Option<f64>,
+    pub direct_claims: DeployerRewardsDirectClaims,
+    pub social_claims: DeployerRewardsRail,
+    pub share_payouts: DeployerRewardsSharePayouts,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerRewardsAttributed {
+    pub sol: f64,
+    pub usdc: f64,
+    #[serde(default)]
+    pub usd: Option<f64>,
+    pub count: i64,
+    pub to_self: DeployerRewardsMoney,
+    pub to_others: DeployerRewardsMoney,
+    /// Share of attributed fees redirected away from the deployer, 0–100. `None` with no attributed fees.
+    #[serde(default)]
+    pub redirected_pct: Option<f64>,
+    pub tokens_with_payouts: i64,
+    pub distributions: i64,
+    pub recipients: i64,
+    #[serde(default)]
+    pub first_at: Option<String>,
+    #[serde(default)]
+    pub last_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerRewardsSocial {
+    pub platform: i64,
+    pub user_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerRewardsTopToken {
+    pub mint: String,
+    pub quote: String,
+    pub total: f64,
+    #[serde(default)]
+    pub total_usd: Option<f64>,
+    pub to_self: f64,
+    #[serde(default)]
+    pub to_self_usd: Option<f64>,
+    pub payouts: i64,
+    pub recipients: i64,
+    pub last_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerRewardsTopRecipient {
+    pub address: String,
+    pub quote: String,
+    pub total: f64,
+    #[serde(default)]
+    pub total_usd: Option<f64>,
+    pub tokens: i64,
+    pub payouts: i64,
+    pub last_at: String,
+    pub is_self: bool,
+    pub is_social_pda: bool,
+    #[serde(default)]
+    pub social: Option<DeployerRewardsSocial>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerRewardsQuote {
+    #[serde(default)]
+    pub sol_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerRewardsCoverage {
+    pub payouts_since: String,
+    pub direct_claims_window_days: i64,
+    pub note: String,
+}
+
+/// pump.fun creator-fee rewards for a wallet. `collected` (what actually reached
+/// it) and `attributed` (what was paid out on the tokens it deployed) are kept
+/// deliberately separate — never merge them.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerRewardsResponse {
+    pub wallet: String,
+    pub is_deployer: bool,
+    /// Tokens attributed to this wallet in our token table — the universe
+    /// `attributed` is computed over. NOT the deployer profile's total deploy count.
+    pub tokens_in_scope: i64,
+    pub collected: DeployerRewardsCollected,
+    pub attributed: DeployerRewardsAttributed,
+    pub top_tokens: Vec<DeployerRewardsTopToken>,
+    pub top_recipients: Vec<DeployerRewardsTopRecipient>,
+    pub quote: DeployerRewardsQuote,
+    pub coverage: DeployerRewardsCoverage,
+}
+
 // ─── Alpha Wallet Intelligence ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
