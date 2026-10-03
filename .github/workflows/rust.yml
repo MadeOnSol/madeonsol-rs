@@ -1,44 +1,40 @@
 name: rust
 # Compiles the crate in the cloud — local cargo is unavailable (Smart App Control)
-# and the prod server has no cargo, so this is the only thing that actually verifies
-# the Rust SDK builds + is publishable before a crates.io release.
+# and the prod server has no cargo, so this verifies the Rust SDK builds + is
+# publishable before a crates.io release.
 #
-# `build` runs on every push/PR/dispatch (compile + dry-run publish).
-# `publish` runs ONLY on a `v*` tag push or manual dispatch, and ONLY after
-# `build` is green — it does the real `cargo publish` using the CRATES_TOKEN
-# repo secret (Settings → Secrets and variables → Actions → New repository secret,
-# name CRATES_TOKEN, value = a crates.io API token scoped to publish-update).
-# Tag a release with `git tag vX.Y.Z && git push origin vX.Y.Z` and it self-publishes.
+# VERIFY ONLY. This workflow never publishes and uses no secrets. Every trigger
+# (push, PR, `v*` tag push, manual dispatch) runs the same `build` job: compile,
+# check all targets, and `cargo publish --dry-run`. On a `v*` tag it also checks
+# that the tag equals the Cargo.toml version.
+#
+# The ONE crates.io publisher is the monorepo's `scripts/release-sdks.sh`
+# (MadeOnSol/madeonsol, decision 2026-10-03): it verifies this repo's default
+# branch, creates the vX.Y.Z tag at that commit (never moves an existing tag),
+# then runs `cargo publish` from the tagged commit on the release server. A real
+# publish job here would race it, so there is none — do not add one back.
 on:
   push:
     branches: [main, master]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30  # stable branch as of 2026-07-02
+      - name: Tag matches Cargo.toml version (tag pushes only)
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          v="$(grep -m1 -E '^version *= *"' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "::error::tag $GITHUB_REF_NAME != Cargo.toml version $v"; exit 1; }
       - name: Build (debug)
         run: cargo build --verbose
       - name: Compile all targets (lib + tests + examples, no run)
         run: cargo check --all-targets --verbose
-      - name: Verify it packages + builds for publish
+      - name: Verify it packages + builds for publish (dry run, never uploads)
         run: cargo publish --dry-run --verbose
-
-  publish:
-    # Real publish to crates.io. Only on a version tag or a manual run, and only
-    # if `build` passed. A no-op-with-error if the version already exists on
-    # crates.io (cargo publish refuses to overwrite) — safe to re-run.
-    needs: build
-    if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30  # stable branch as of 2026-07-02
-      - name: cargo publish
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
-        run: cargo publish --verbose

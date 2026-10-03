@@ -878,6 +878,12 @@ if let Some(s) = live.sessions.first() {
 - Pricing & free key: <https://madeonsol.com/pricing>
 - Issues: <https://github.com/madeonsol/madeonsol-rs/issues>
 
+## Releasing (maintainers)
+
+Releases are cut by the MadeOnSol monorepo's `scripts/release-sdks.sh`, the only publisher of the `madeonsol` crate. It checks that the local clone equals `origin/master` and that the committed `Cargo.toml` version matches, creates the `vX.Y.Z` tag on that commit (an existing tag is reused only if it already points there and is never moved), then runs `cargo publish` from the tagged commit.
+
+The GitHub Actions workflow in this repo only verifies: build, check, and `cargo publish --dry-run` on every push, PR, tag and manual run. It has no publish job and needs no crates.io token. Pushing a `v*` tag by hand does not publish anything.
+
 ## License
 
 MIT © [MadeOnSol](https://madeonsol.com)
