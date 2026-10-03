@@ -45,6 +45,7 @@
 //! - [`MadeOnSol::tools`] — Solana tool directory search
 //! - [`MadeOnSol::stream`] — WebSocket streaming token issuance + live session list/kill
 //! - [`MadeOnSol::webhooks`] — webhook CRUD (PRO/ULTRA)
+//! - [`MadeOnSol::copytrade`] — copy-trade rules CRUD + fired signals (PRO+)
 //!
 //! Full API reference: <https://madeonsol.com/api-docs>
 
@@ -59,7 +60,7 @@ pub mod types;
 use std::sync::Arc;
 
 use crate::api::{
-    alpha::Alpha, coordination_alerts::CoordinationAlerts, deployer::Deployer,
+    alpha::Alpha, coordination_alerts::CoordinationAlerts, copytrade::Copytrade, deployer::Deployer,
     first_touch_subscriptions::FirstTouchSubscriptions, kol::Kol, me::Me,
     price_alerts::PriceAlerts, signals::Signals, sniper::Sniper, stream::Stream, token::Token,
     tools::Tools, wallet::Wallet, wallet_tracker::WalletTracker, webhooks::Webhooks,
@@ -120,6 +121,9 @@ pub struct MadeOnSol {
     pub stream: Stream,
     /// Webhook management (PRO/ULTRA).
     pub webhooks: Webhooks,
+    /// Copy-trade rules CRUD + signal history (PRO+).
+    pub copytrade: Copytrade,
+    core: Arc<HttpCore>,
 }
 
 impl MadeOnSol {
@@ -162,8 +166,19 @@ impl MadeOnSol {
             sniper: Sniper { core: Arc::clone(&core) },
             tools: Tools { core: Arc::clone(&core) },
             stream: Stream { core: Arc::clone(&core) },
-            webhooks: Webhooks { core },
+            webhooks: Webhooks { core: Arc::clone(&core) },
+            copytrade: Copytrade { core: Arc::clone(&core) },
+            core,
         })
+    }
+
+    /// As-of dataset manifests (`GET /manifests`): one nightly manifest per
+    /// dataset (row counts, time range, schema hash, fingerprint). Every tier.
+    pub async fn manifests(
+        &self,
+        params: &crate::types::ManifestsParams,
+    ) -> Result<crate::types::ManifestsResponse> {
+        self.core.get("/manifests", params).await
     }
 }
 

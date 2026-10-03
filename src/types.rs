@@ -580,24 +580,48 @@ pub struct KolLeaderboardResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct KolPnlByToken {
-    pub mint: String,
+    pub token_mint: String,
+    #[serde(default)]
     pub token_name: Option<String>,
+    #[serde(default)]
     pub token_symbol: Option<String>,
-    pub realized_pnl_usd: f64,
     pub buy_count: u32,
     pub sell_count: u32,
+    /// SOL bought.
+    #[serde(default)]
+    pub total_bought: Option<f64>,
+    /// SOL sold.
+    #[serde(default)]
+    pub total_sold: Option<f64>,
+    #[serde(default)]
+    pub pnl: Option<f64>,
+    /// "open" | "win" | "loss".
+    #[serde(default)]
+    pub result: Option<String>,
+    #[serde(default)]
+    pub first_trade: Option<String>,
+    #[serde(default)]
+    pub last_trade: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct KolWalletProfile {
-    pub wallet: String,
-    pub kol_name: Option<String>,
-    pub kol_twitter: Option<String>,
-    pub total_pnl_usd: f64,
-    pub win_rate: f64,
-    pub trade_count: u32,
+    pub kol: KolProfileIdentity,
+    pub stats: KolProfileStats,
+    #[serde(default)]
+    pub scores: Option<HashMap<String, serde_json::Value>>,
+    /// Percentile ranks vs the KOL set (null = not ranked).
+    #[serde(default)]
+    pub peer_ranks: Option<KolPeerRanks>,
+    #[serde(default)]
+    pub recent_trades: Vec<serde_json::Value>,
+    /// Only with `include=pnl_by_token`.
     #[serde(default)]
     pub pnl_by_token: Option<Vec<KolPnlByToken>>,
+    #[serde(default)]
+    pub recent_winners: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    pub recent_losers: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -654,6 +678,16 @@ pub struct CoordinatedToken {
     pub last_price_usd: Option<f64>,
     #[serde(default)]
     pub kols: Option<Vec<CoordinationKol>>,
+    /// MC change per window ("5m", "15m", "1h", "2h", "4h"); only windows with enough history.
+    #[serde(default)]
+    pub mc_change_pct: Option<HashMap<String, Option<f64>>>,
+    #[serde(default)]
+    pub volume_usd: Option<HashMap<String, f64>>,
+    #[serde(default)]
+    pub mev_volume_pct: Option<HashMap<String, Option<f64>>>,
+    /// Seconds of tracked history behind the windows (capped ~4h05m).
+    #[serde(default)]
+    pub history_age_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -673,15 +707,10 @@ pub struct KolCoordinationResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct KolTokenActivity {
-    pub mint: String,
-    pub token_name: Option<String>,
-    pub token_symbol: Option<String>,
-    pub kol_buyers: Vec<String>,
-    pub kol_sellers: Vec<String>,
-    pub buy_count: u32,
-    pub sell_count: u32,
-    pub total_sol_volume: f64,
-    pub recent_trades: Vec<KolTrade>,
+    pub token_mint: String,
+    pub summary: KolTokenFlowSummary,
+    #[serde(default)]
+    pub kols: Vec<KolTokenFlowKol>,
 }
 
 // ─── KOL pairs / timing / hot-tokens / pnl / trending ───────────────────────
@@ -862,6 +891,13 @@ pub struct KolClosedPosition {
     pub result: String,
     pub first_trade: String,
     pub last_trade: String,
+    /// Still holds part of the position after the sells.
+    #[serde(default)]
+    pub still_holding: Option<bool>,
+    #[serde(default)]
+    pub held_value_sol: Option<f64>,
+    #[serde(default)]
+    pub unrealized_pnl_sol: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -872,6 +908,13 @@ pub struct KolOpenPosition {
     pub buy_count: u32,
     pub bought_sol: f64,
     pub first_buy_at: String,
+    #[serde(default)]
+    pub held_value_sol: Option<f64>,
+    #[serde(default)]
+    pub unrealized_pnl_sol: Option<f64>,
+    /// false = no live price, so `held_value_sol` / `unrealized_pnl_sol` are 0, not measured.
+    #[serde(default)]
+    pub is_priced: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1056,6 +1099,9 @@ pub struct KolCompareResponse {
     pub profiles: Vec<KolCompareProfile>,
     #[serde(default)]
     pub overlap: Option<Vec<KolCompareOverlapToken>>,
+    /// What `overlap` covers (top 25 of `total` qualifying tokens, 30 d).
+    #[serde(default)]
+    pub overlap_meta: Option<KolOverlapMeta>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1733,6 +1779,17 @@ pub struct DeployerStats {
     pub tiers: DeployerTierCounts,
     #[serde(default, rename = "_rid")]
     pub _rid: Option<String>,
+    /// Mean MC (USD) at alert per tier over 30 d; tier value null = unknown.
+    #[serde(default)]
+    pub avg_mc_at_alert_usd_30d: Option<HashMap<String, Option<f64>>>,
+    /// Alerts with an MC sample per tier over 30 d; null when the aggregate failed.
+    #[serde(default)]
+    pub mc_at_alert_samples_30d: Option<HashMap<String, Option<u64>>>,
+    #[serde(default)]
+    pub mc_at_alert_window_start: Option<String>,
+    /// false = the MC aggregate read failed; the two maps above are then null.
+    #[serde(default)]
+    pub mc_at_alert_complete: Option<bool>,
 }
 
 // ─── Shared: DeployerSummary (used by RecentBond, DeployerAlert) ─────────────
@@ -1818,13 +1875,29 @@ pub struct DeployerLeaderboardResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeployerToken {
-    pub mint: String,
-    pub name: Option<String>,
-    pub symbol: Option<String>,
-    pub bonded: bool,
-    pub deployed_at: String,
+    pub id: String,
+    pub token_mint: String,
+    #[serde(default)]
+    pub token_name: Option<String>,
+    #[serde(default)]
+    pub token_symbol: Option<String>,
+    #[serde(default)]
+    pub deployed_at: Option<String>,
+    #[serde(default)]
     pub bonded_at: Option<String>,
-    pub peak_market_cap_usd: Option<f64>,
+    #[serde(default)]
+    pub time_to_bond_minutes: Option<f64>,
+    #[serde(default)]
+    pub peak_market_cap: Option<f64>,
+    #[serde(default)]
+    pub mc_at_bond: Option<f64>,
+    #[serde(default)]
+    pub market_cap_at_alert: Option<f64>,
+    #[serde(default)]
+    pub alerted_at: Option<String>,
+    /// create → migrate within ~90 s (a bundle filled the curve).
+    #[serde(default)]
+    pub instant_bond: Option<bool>,
 }
 
 /// A LaunchLab (bonk) / bags token from our own DB on `GET /deployer-hunter/{wallet}`.
@@ -1928,7 +2001,7 @@ pub struct DeployerProfileResponse {
     pub pump_stats: Option<DeployerPumpStats>,
     /// Raw pump.fun API token list (pump.fun-launched tokens only).
     #[serde(default)]
-    pub pump_tokens: Vec<serde_json::Value>,
+    pub pump_tokens: Vec<DeployerPumpToken>,
     /// `true` when the pump.fun API read failed (`pump_tokens` is then empty);
     /// `None` on the not-a-deployer answer.
     #[serde(default)]
@@ -1976,8 +2049,17 @@ pub struct DeployerProfile {
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeployerTokensResponse {
     pub tokens: Vec<DeployerToken>,
-    pub count: u32,
-    pub total: u32,
+    #[serde(default)]
+    pub total: u64,
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub offset: Option<u32>,
+    #[serde(default)]
+    pub has_more: Option<bool>,
+    /// Present on the not-a-deployer empty page.
+    #[serde(default)]
+    pub wallet: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2079,6 +2161,12 @@ pub struct DeployerAlertStats {
     pub period: String,
     #[serde(default, rename = "_rid")]
     pub _rid: Option<String>,
+    /// Rows the aggregates were computed over.
+    #[serde(default)]
+    pub sampled_rows: Option<u64>,
+    /// true = the safety ceiling was hit; aggregates are a sample, not the population.
+    #[serde(default)]
+    pub truncated: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2134,6 +2222,9 @@ pub struct RecentBond {
     #[serde(default)]
     pub mc_at_bond: Option<f64>,
     pub deployers: DeployerSummary,
+    /// create → migrate within ~90 s (a bundle filled the curve).
+    #[serde(default)]
+    pub instant_bond: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2591,13 +2682,23 @@ pub struct AlphaLinkedWallet {
     pub wallet_address: String,
     pub shared_tokens: u32,
     pub similarity_score: f64,
+    /// Mean seconds between the paired trades.
+    #[serde(default)]
+    pub avg_time_diff_secs: Option<f64>,
+    /// Mean SOL-size difference between the paired trades.
+    #[serde(default)]
+    pub avg_sol_diff: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AlphaLinkedResponse {
     pub wallet: String,
+    /// Wire key is `linked` (`linked_wallets` accepted for older payloads).
+    #[serde(rename = "linked", alias = "linked_wallets", default)]
     pub linked_wallets: Vec<AlphaLinkedWallet>,
-    pub total: u32,
+    /// Not sent by the API today; kept optional for compatibility.
+    #[serde(default)]
+    pub total: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2613,6 +2714,9 @@ pub struct AlphaCapTableBuyer {
     pub historical_win_rate: Option<f64>,
     pub historical_pnl_sol: Option<f64>,
     pub historical_tokens: Option<u32>,
+    /// No sell observed from this buyer yet.
+    #[serde(default)]
+    pub still_holding: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2686,6 +2790,9 @@ pub struct AlphaBuyerQualityResponse {
     /// v0.23.4 — trade-coverage disclosure (`None` on older cached responses).
     #[serde(default)]
     pub coverage: Option<TokenTradesCoverage>,
+    /// Present only when `breakdown.dump_cluster_count >= 1` and a signal-performance bucket exists.
+    #[serde(default)]
+    pub signal_stats: Option<BuyerQualitySignalStats>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2711,12 +2818,21 @@ pub struct TokenKolTopBuyer {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TokenKolActivity {
-    pub buying_kols: u32,
-    pub selling_kols: u32,
-    pub net_flow_sol: f64,
-    /// "accumulating" | "distributing" | "neutral".
-    pub signal: String,
+    #[serde(default)]
+    pub buying_kols: Option<u32>,
+    #[serde(default)]
+    pub selling_kols: Option<u32>,
+    #[serde(default)]
+    pub net_flow_sol: Option<f64>,
+    #[serde(default)]
+    pub signal: Option<String>,
+    #[serde(default)]
     pub top_buyers: Vec<TokenKolTopBuyer>,
+    /// false = the KOL aggregate read failed; counts above are null (unknown).
+    #[serde(default)]
+    pub complete: Option<bool>,
+    #[serde(default)]
+    pub window_hours: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2773,6 +2889,36 @@ pub struct TokenResponseBody {
     /// Count of first-20 buyers of this token (0–20).
     #[serde(default)]
     pub launch_cohort_size: Option<u32>,
+    #[serde(default)]
+    pub price_source: Option<String>,
+    #[serde(default)]
+    pub price_observed_at: Option<String>,
+    #[serde(default)]
+    pub price_age_seconds: Option<u64>,
+    #[serde(default)]
+    pub price_is_stale: Option<bool>,
+    #[serde(default)]
+    pub vwap_price_usd: Option<f64>,
+    #[serde(default)]
+    pub vwap_price_sol: Option<f64>,
+    #[serde(default)]
+    pub primary_pool_address: Option<String>,
+    /// Token-SUPPLY burn detected (not an LP burn); null = unknown.
+    #[serde(default)]
+    pub token_supply_burn_detected: Option<bool>,
+    /// "verified" | "not_verified" | "unknown".
+    #[serde(default)]
+    pub lp_burn_status: Option<String>,
+    #[serde(default)]
+    pub deployer_identity: Option<TokenDeployerIdentity>,
+    #[serde(default)]
+    pub mc_change_pct: Option<HashMap<String, Option<f64>>>,
+    #[serde(default)]
+    pub volume_usd: Option<HashMap<String, f64>>,
+    #[serde(default)]
+    pub mev_volume_pct: Option<HashMap<String, Option<f64>>>,
+    #[serde(default)]
+    pub history_age_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2780,6 +2926,15 @@ pub struct TokenResponse {
     pub token: TokenResponseBody,
     #[serde(default, rename = "_rid")]
     pub _rid: Option<String>,
+    /// `?include=deployer`: the GET /deployer-hunter/{wallet} body for this token's deployer.
+    #[serde(default)]
+    pub deployer_profile: Option<DeployerProfileResponse>,
+    #[serde(default)]
+    pub buyer_quality: Option<AlphaBuyerQualityResponse>,
+    #[serde(default)]
+    pub include_errors: Option<HashMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub included: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2856,19 +3011,29 @@ pub struct RiskInputs {
     pub liquidity_usd: Option<f64>,
     #[serde(default)]
     pub liquidity_to_mc_ratio: Option<f64>,
-    pub transfer_fee_bps: i64,
-    pub is_token_2022: bool,
-    pub burn_detected: bool,
+    #[serde(default)]
+    pub transfer_fee_bps: Option<i64>,
+    #[serde(default)]
+    pub is_token_2022: Option<bool>,
+    /// Deprecated alias of `token_supply_burn_detected`.
+    #[serde(default)]
+    pub burn_detected: Option<bool>,
+    #[serde(default)]
+    pub token_supply_burn_detected: Option<bool>,
+    #[serde(default)]
+    pub lp_burn_status: Option<String>,
     #[serde(default)]
     pub launch_cohort_sol: Option<f64>,
-    pub launch_cohort_size: i64,
+    #[serde(default)]
+    pub launch_cohort_size: Option<i64>,
     #[serde(default)]
     pub deployer_bonding_rate: Option<f64>,
     #[serde(default)]
     pub deployer_total_deployed: Option<i64>,
     #[serde(default)]
     pub kol_signal: Option<String>,
-    pub is_blacklisted: bool,
+    #[serde(default)]
+    pub is_blacklisted: Option<bool>,
     /// v0.22 — slot-window launch-snipe rollup ([`SniperFootprint`]). `None`
     /// when no rollup exists for the mint; inside it, `data_available = false`
     /// means "not observable", NOT "0 snipes".
@@ -2962,6 +3127,14 @@ pub struct TokenRisk {
     pub as_of: String,
     #[serde(default, rename = "_rid")]
     pub _rid: Option<String>,
+    #[serde(default)]
+    pub assessment: Option<RiskAssessment>,
+    /// "ok" | "not_found" | "unavailable".
+    #[serde(default)]
+    pub dev_status: Option<String>,
+    /// Set when a POOL address was passed and the answer is for its mint.
+    #[serde(default)]
+    pub resolved_from: Option<RiskResolvedFrom>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -3003,6 +3176,18 @@ pub struct BatchRiskResult {
     /// `Some("not_tracked")` when the mint isn't tracked; `None` for a scored result.
     #[serde(default)]
     pub error: Option<String>,
+    #[serde(default)]
+    pub assessment: Option<RiskAssessment>,
+    #[serde(default)]
+    pub dev_status: Option<String>,
+    #[serde(default)]
+    pub code: Option<String>,
+    /// Inputs that could not be read (error "unavailable").
+    #[serde(default)]
+    pub unavailable_inputs: Option<Vec<String>>,
+    /// true = safe to retry this mint.
+    #[serde(default)]
+    pub retryable: Option<bool>,
 }
 
 impl BatchRiskResult {
@@ -5128,6 +5313,19 @@ pub struct CandlesResponse {
     /// Whether ULTRA net-flow fields are populated on the candles.
     pub net_flow_included: bool,
     pub candles: Vec<Candle>,
+    #[serde(default)]
+    pub truncated: Option<bool>,
+    /// Oldest instant this page covers.
+    #[serde(default)]
+    pub covered_from: Option<String>,
+    /// Plan history floor (PRO 30 d); null = no floor.
+    #[serde(default)]
+    pub history_floor: Option<String>,
+    #[serde(default)]
+    pub history_clamped: Option<bool>,
+    /// true = the whole window is older than the plan floor (empty page, not an error).
+    #[serde(default)]
+    pub history_outside_plan: Option<bool>,
 }
 
 // ─── Token flow (/tokens/{mint}/flow) ───────────────────────────────────────
@@ -5611,22 +5809,38 @@ pub struct WatchlistResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct WalletTrackerEvent {
-    pub id: String,
+    #[serde(default)]
+    pub id: Option<String>,
     pub wallet_address: String,
     pub label: Option<String>,
     pub event_type: WalletTrackerEventType,
-    pub action: WalletTrackerAction,
+    #[serde(default)]
+    pub action: Option<WalletTrackerAction>,
     pub block_time: i64,
-    pub block_time_iso: String,
+    #[serde(default)]
+    pub block_time_iso: Option<String>,
     pub token_mint: Option<String>,
     pub token_symbol: Option<String>,
     pub token_name: Option<String>,
-    pub sol_amount: f64,
+    #[serde(default)]
+    pub sol_amount: Option<f64>,
     pub token_amount: Option<f64>,
     pub price_per_token_sol: Option<f64>,
     pub counterparty: Option<String>,
     pub tx_signature: Option<String>,
     pub program: Option<String>,
+    /// Authoritative chain position; null on rows written before slot capture.
+    #[serde(default)]
+    pub slot: Option<u64>,
+    /// true = arrived through a replay (handover / reconnect), not live delivery.
+    #[serde(default)]
+    pub replayed: Option<bool>,
+    /// When MadeOnSol ingested it (NOT chain time — order by `slot`).
+    #[serde(default)]
+    pub ingested_at: Option<String>,
+    /// Alias of `ingested_at`.
+    #[serde(default)]
+    pub timestamp: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -5647,6 +5861,14 @@ pub struct WalletTrackerTradesParams {
 pub struct WalletTrackerTradesResponse {
     pub events: Vec<WalletTrackerEvent>,
     pub count: u32,
+    /// "slot" | "block_time" — the column this page was ordered by.
+    #[serde(default)]
+    pub ordered_by: Option<String>,
+    #[serde(default)]
+    pub next_cursor: Option<i64>,
+    /// Pass back as `before_slot` under slot ordering.
+    #[serde(default)]
+    pub next_cursor_slot: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -5736,6 +5958,14 @@ pub struct SniperDeploy {
     /// (absent, not zero).
     #[serde(default)]
     pub footprint: Option<SniperFootprint>,
+    /// Dual-region delivery confirmation (transport-level).
+    #[serde(default)]
+    pub detection_confirmed: Option<bool>,
+    /// "unverified" | "confirmed" | "corrected".
+    #[serde(default)]
+    pub attribution_status: Option<String>,
+    #[serde(default)]
+    pub attribution_checked_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -6150,6 +6380,15 @@ pub struct WalletPnlResponse {
     /// PnL is built from zero covered trades, not that the wallet never traded.
     #[serde(default)]
     pub coverage: Option<TokenTradesCoverage>,
+    /// Age of the cached analysis.
+    #[serde(default)]
+    pub cache_age_seconds: Option<u64>,
+    /// "head_checked" | "unverified".
+    #[serde(default)]
+    pub cache_validation: Option<String>,
+    /// e.g. "new_activity" — a stale cache hit was recomputed.
+    #[serde(default)]
+    pub cache_invalidated: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -6165,6 +6404,15 @@ pub struct WalletPositionsResponse {
     /// v0.23.4 — trade-coverage disclosure (`None` on older cached responses).
     #[serde(default)]
     pub coverage: Option<TokenTradesCoverage>,
+    /// Age of the cached analysis.
+    #[serde(default)]
+    pub cache_age_seconds: Option<u64>,
+    /// "head_checked" | "unverified".
+    #[serde(default)]
+    pub cache_validation: Option<String>,
+    /// e.g. "new_activity" — a stale cache hit was recomputed.
+    #[serde(default)]
+    pub cache_invalidated: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -6428,6 +6676,17 @@ pub struct StreamToken {
     pub usage: String,
     #[serde(default, rename = "_rid")]
     pub _rid: Option<String>,
+    /// Example subscribe frame.
+    #[serde(default)]
+    pub subscribe_example: Option<serde_json::Value>,
+    #[serde(default)]
+    pub channels: Option<serde_json::Value>,
+    #[serde(default)]
+    pub token_prices: Option<StreamChannelGuide>,
+    #[serde(default)]
+    pub rhc_token_prices: Option<StreamChannelGuide>,
+    #[serde(default)]
+    pub named_subscriptions: Option<StreamChannelGuide>,
 }
 
 /// A single live WebSocket session for your account, as returned by
@@ -6756,6 +7015,15 @@ pub struct TokenSummary {
     pub liquidity_to_mc_ratio: Option<f64>,
     /// Deployer reputation tier (e.g. `"elite"`, `"good"`, `"unranked"`).
     pub deployer_tier: Option<String>,
+    /// Verified LP burn/lock evidence only; null = unknown (see `lp_burn_status`).
+    #[serde(default)]
+    pub lp_burned: Option<bool>,
+    /// "verified" | "not_verified" | "unknown".
+    #[serde(default)]
+    pub lp_burn_status: Option<String>,
+    /// Token-SUPPLY burn detected (not an LP burn); null = unknown.
+    #[serde(default)]
+    pub token_supply_burn_detected: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -6774,6 +7042,9 @@ pub struct TokensListResponse {
     pub filters: serde_json::Value,
     #[serde(default, rename = "_rid")]
     pub _rid: Option<String>,
+    /// Present when a deprecated parameter (e.g. `lp_burned=`) was sent.
+    #[serde(default)]
+    pub deprecations: Option<Vec<ParamDeprecation>>,
 }
 
 // ─── Price alerts (v1.9) ────────────────────────────────────────────────────
@@ -7048,4 +7319,991 @@ pub struct AlmostBondedResponse {
     pub note: String,
     #[serde(default, rename = "_rid")]
     pub _rid: Option<String>,
+}
+
+// ─── Contract parity 2026-10-03 (shapes from src/app/api/v1/** route source) ───
+
+/// One pump.fun token on `GET /deployer-hunter/{wallet}` (`pump_tokens[]`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerPumpToken {
+    pub mint: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub symbol: String,
+    #[serde(default)]
+    pub image_uri: String,
+    #[serde(default)]
+    pub creator: String,
+    /// Unix milliseconds as reported by pump.fun (0 = unknown).
+    #[serde(default)]
+    pub created_timestamp: f64,
+    #[serde(default)]
+    pub complete: bool,
+    #[serde(default)]
+    pub ath_market_cap: f64,
+    #[serde(default)]
+    pub usd_market_cap: f64,
+    #[serde(default)]
+    pub market_cap: f64,
+    #[serde(default)]
+    pub reply_count: f64,
+    #[serde(default)]
+    pub pool_address: Option<String>,
+    #[serde(default)]
+    pub pump_swap_pool: Option<String>,
+}
+
+/// `overlap_meta` on `GET /kol/compare`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolOverlapMeta {
+    pub window_start: String,
+    pub min_wallets: u32,
+    /// Qualifying tokens in the window; null when the read failed.
+    #[serde(default)]
+    pub total: Option<u64>,
+    pub returned: u32,
+    #[serde(default)]
+    pub has_more: Option<bool>,
+    pub complete: bool,
+}
+
+/// `summary` on `GET /kol/tokens/{mint}`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolTokenFlowSummary {
+    pub kol_count: u32,
+    pub total_bought_sol: f64,
+    pub total_sold_sol: f64,
+    pub net_flow_sol: f64,
+    /// "accumulating" | "distributing".
+    pub signal: String,
+}
+
+/// One KOL on `GET /kol/tokens/{mint}` (`kols[]`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolTokenFlowKol {
+    #[serde(default)]
+    pub name: Option<String>,
+    pub wallet: String,
+    pub buy_count: u32,
+    pub sell_count: u32,
+    /// SOL bought.
+    pub total_bought: f64,
+    /// SOL sold.
+    pub total_sold: f64,
+    pub net_sol: f64,
+    /// "net_buyer" | "net_seller" | "neutral".
+    pub position: String,
+    #[serde(default)]
+    pub first_trade: Option<String>,
+    #[serde(default)]
+    pub last_trade: Option<String>,
+}
+
+/// `kol` block on `GET /kol/{wallet}`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolProfileIdentity {
+    #[serde(default)]
+    pub name: Option<String>,
+    pub wallet: String,
+    #[serde(default)]
+    pub twitter_url: Option<String>,
+    #[serde(default)]
+    pub strategy_tag: Option<String>,
+    #[serde(default)]
+    pub auto_strategy_tag: Option<String>,
+}
+
+/// `stats` block on `GET /kol/{wallet}`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolProfileStats {
+    pub pnl: f64,
+    pub buy_count: u32,
+    pub sell_count: u32,
+    pub volume: f64,
+    /// Absent when no closed position exists.
+    #[serde(default)]
+    pub win_rate: Option<f64>,
+}
+
+/// `peer_ranks` on `GET /kol/{wallet}` (percentiles vs the KOL set).
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolPeerRanks {
+    #[serde(default)]
+    pub percentile_pnl_7d: Option<f64>,
+    #[serde(default)]
+    pub percentile_winrate_7d: Option<f64>,
+    #[serde(default)]
+    pub percentile_pnl_30d: Option<f64>,
+    #[serde(default)]
+    pub percentile_winrate_30d: Option<f64>,
+    #[serde(default)]
+    pub percentile_early_entry_30d: Option<f64>,
+}
+
+/// One row on `GET /kol/scouts/leaderboard`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolScout {
+    pub wallet: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub twitter_url: Option<String>,
+    /// "S" | "A" | "B" | "C".
+    #[serde(default)]
+    pub scout_tier: Option<String>,
+    #[serde(default)]
+    pub first_touches_30d: Option<u64>,
+    #[serde(default)]
+    pub avg_followers_4h: Option<f64>,
+    #[serde(default)]
+    pub swarm_3plus_pct: Option<f64>,
+    #[serde(default)]
+    pub swarm_5plus_pct: Option<f64>,
+    #[serde(default)]
+    pub computed_at: Option<String>,
+}
+
+/// `GET /kol/scouts/leaderboard`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolScoutLeaderboardResponse {
+    pub scouts: Vec<KolScout>,
+    pub count: u32,
+}
+
+/// One event on `GET /kol/coordination/history`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolCoordinationHistoryEvent {
+    pub token_mint: String,
+    pub fired_at: String,
+    pub coordination_score: f64,
+    /// Fires deduplicated into this event.
+    pub total_fires: u32,
+    pub kol_buyers: u32,
+    #[serde(default)]
+    pub current_mc_usd: Option<f64>,
+    #[serde(default)]
+    pub current_price_usd: Option<f64>,
+}
+
+/// `GET /kol/coordination/history`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolCoordinationHistoryResponse {
+    pub events: Vec<KolCoordinationHistoryEvent>,
+    pub count: u32,
+}
+
+/// Per-channel guide blocks on `POST /stream/token` (`token_prices`,
+/// `rhc_token_prices`, `named_subscriptions`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamChannelGuide {
+    #[serde(default)]
+    pub subscribe_example: Option<serde_json::Value>,
+    #[serde(default)]
+    pub mint_cap: Option<u32>,
+    #[serde(default)]
+    pub address_cap: Option<u32>,
+    #[serde(default)]
+    pub coalesce_ms: Option<u64>,
+    #[serde(default)]
+    pub max_per_connection: Option<u32>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// `deployer_identity` on `/token/{mint}` and `/token/batch`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenDeployerIdentity {
+    /// "resolved" | "unknown" | "lookup_failed".
+    pub identity_status: String,
+    #[serde(default)]
+    pub history_status: Option<String>,
+    #[serde(default)]
+    pub address: Option<String>,
+    /// "deployer_tokens" | "pending_deploys".
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
+/// `signal_stats.dump_cluster_count` on buyer-quality.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BuyerQualityDumpClusterStat {
+    pub value: u32,
+    /// "k>=1" | "k>=3" | "k>=5".
+    pub bucket: String,
+    /// "dump" | "runner".
+    pub outcome: String,
+    pub hit_rate: f64,
+    pub base_rate: f64,
+    pub lift: f64,
+    pub sample_n: u64,
+    pub window_days: u32,
+    pub as_of: String,
+    #[serde(default)]
+    pub summary: Option<String>,
+}
+
+/// `signal_stats` on `GET /tokens/{mint}/buyer-quality`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BuyerQualitySignalStats {
+    #[serde(default)]
+    pub dump_cluster_count: Option<BuyerQualityDumpClusterStat>,
+}
+
+/// `assessment` on token risk.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RiskAssessment {
+    /// "complete" | "incomplete" (score is a lower bound).
+    pub status: String,
+    #[serde(default)]
+    pub unknown_inputs: Vec<String>,
+    #[serde(default)]
+    pub not_assessed: Vec<String>,
+    #[serde(default)]
+    pub explanations: HashMap<String, String>,
+}
+
+/// `resolved_from` on `GET /tokens/{mint}/risk` (a pool address was passed).
+#[derive(Debug, Clone, Deserialize)]
+pub struct RiskResolvedFrom {
+    pub address: String,
+    /// "pool".
+    pub kind: String,
+    #[serde(default)]
+    pub dex: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
+/// `POST /webhooks/test`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebhookTestResponse {
+    pub success: bool,
+    #[serde(default)]
+    pub status_code: Option<u16>,
+    #[serde(default)]
+    pub response_time_ms: Option<u64>,
+    #[serde(default)]
+    pub event: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+// ── Copy-trade subscriptions (PRO+) ──────────────────────────────────────────
+
+/// A warning attached to a copy-trade rule (e.g. untracked source wallets).
+#[derive(Debug, Clone, Deserialize)]
+pub struct CopytradeRuleWarning {
+    pub code: String,
+    pub message: String,
+}
+
+/// A copy-trade rule.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CopytradeSubscription {
+    pub id: i64,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub source_wallets: Vec<String>,
+    #[serde(default)]
+    pub min_trade_sol: Option<f64>,
+    /// "buy" | "sell" | "both".
+    #[serde(default)]
+    pub only_action: Option<String>,
+    /// "fixed" | "proportional" | "percent_source".
+    #[serde(default)]
+    pub sizing_mode: Option<String>,
+    #[serde(default)]
+    pub sizing_amount: Option<f64>,
+    /// "webhook" | "websocket" | "both".
+    #[serde(default)]
+    pub delivery_mode: Option<String>,
+    #[serde(default)]
+    pub webhook_url: Option<String>,
+    #[serde(default)]
+    pub min_mc_usd: Option<f64>,
+    #[serde(default)]
+    pub max_mc_usd: Option<f64>,
+    #[serde(default)]
+    pub is_active: Option<bool>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    /// Source wallets that are tracked KOL wallets (only these can fire). null = lookup failed.
+    #[serde(default)]
+    pub source_wallets_tracked: Option<Vec<String>>,
+    #[serde(default)]
+    pub source_wallets_untracked: Option<Vec<String>>,
+    #[serde(default)]
+    pub warnings: Option<Vec<CopytradeRuleWarning>>,
+}
+
+/// Body for `POST /copytrade/subscriptions`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CopytradeSubscriptionCreateParams {
+    pub source_wallets: Vec<String>,
+    pub sizing_amount: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_trade_sol: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub only_action: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sizing_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delivery_mode: Option<String>,
+    /// HTTPS; required unless `delivery_mode` is "websocket".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_mc_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_mc_usd: Option<f64>,
+}
+
+/// Body for `PATCH /copytrade/subscriptions/{id}` — only set fields are sent.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CopytradeSubscriptionUpdateParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_wallets: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_trade_sol: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub only_action: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sizing_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sizing_amount: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delivery_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_active: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_mc_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_mc_usd: Option<f64>,
+}
+
+/// `GET /copytrade/subscriptions`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CopytradeSubscriptionListResponse {
+    pub subscriptions: Vec<CopytradeSubscription>,
+}
+
+/// `GET` / `POST` / `PATCH` on a single copy-trade rule.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CopytradeSubscriptionResponse {
+    pub subscription: CopytradeSubscription,
+    #[serde(default)]
+    pub warnings: Option<Vec<CopytradeRuleWarning>>,
+    /// One-time HMAC secret (create, or PATCH that set the first webhook_url). Save it.
+    #[serde(default)]
+    pub webhook_secret: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// `DELETE /copytrade/subscriptions/{id}`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CopytradeSubscriptionDeleteResponse {
+    pub deleted: bool,
+}
+
+/// Query for `GET /copytrade/signals`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CopytradeSignalsParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscription_id: Option<i64>,
+    /// ISO-8601; signals fired at or after.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    /// 1–500 (default 50).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_mc_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_mc_usd: Option<f64>,
+}
+
+/// One fired copy-trade signal.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CopytradeSignal {
+    pub id: i64,
+    pub subscription_id: i64,
+    pub fired_at: String,
+    pub source_wallet: String,
+    /// "buy" | "sell".
+    pub action: String,
+    pub token_mint: String,
+    #[serde(default)]
+    pub token_symbol: Option<String>,
+    #[serde(default)]
+    pub token_name: Option<String>,
+    #[serde(default)]
+    pub source_sol_amount: Option<f64>,
+    #[serde(default)]
+    pub suggested_sol_amount: Option<f64>,
+    #[serde(default)]
+    pub tx_signature: Option<String>,
+    #[serde(default)]
+    pub delivered: Option<bool>,
+    #[serde(default)]
+    pub delivered_at: Option<String>,
+    #[serde(default)]
+    pub market_cap_usd_at_trade: Option<f64>,
+    #[serde(default)]
+    pub price_usd_at_trade: Option<f64>,
+    #[serde(default)]
+    pub market_cap_usd: Option<f64>,
+    #[serde(default)]
+    pub last_price_usd: Option<f64>,
+    #[serde(default)]
+    pub mc_change_pct: Option<HashMap<String, Option<f64>>>,
+    #[serde(default)]
+    pub volume_usd: Option<HashMap<String, f64>>,
+    #[serde(default)]
+    pub mev_volume_pct: Option<HashMap<String, Option<f64>>>,
+    #[serde(default)]
+    pub history_age_seconds: Option<u64>,
+}
+
+/// `GET /copytrade/signals`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CopytradeSignalsResponse {
+    pub signals: Vec<CopytradeSignal>,
+}
+
+// ── KOL roster / manifests / token search ────────────────────────────────────
+
+/// Query for `GET /kol/wallets`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct KolWalletsParams {
+    /// 1–500 (default 200).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// 0–5000.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
+    /// "true" (default) | "false" | "all".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active: Option<String>,
+    /// Name substring, 1–40 chars.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub q: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<String>,
+}
+
+/// One tracked KOL wallet (roster only — no performance numbers).
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolRosterWallet {
+    pub wallet_address: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub twitter_url: Option<String>,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub strategy_tag: Option<String>,
+    #[serde(default)]
+    pub twitter_followers: Option<u64>,
+    #[serde(default)]
+    pub follow_count: u64,
+    #[serde(default)]
+    pub is_active: bool,
+    #[serde(default)]
+    pub tracked_since: Option<String>,
+}
+
+/// `GET /kol/wallets`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolWalletsResponse {
+    pub wallets: Vec<KolRosterWallet>,
+    pub count: u32,
+    pub total: u64,
+    pub limit: u32,
+    pub offset: u32,
+    pub has_more: bool,
+}
+
+/// Query for `GET /manifests`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ManifestsParams {
+    /// Dataset name (`[a-z0-9_]`); omitted = latest manifest of every dataset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dataset: Option<String>,
+    /// 1–365.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// One nightly dataset manifest.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DatasetManifest {
+    pub dataset: String,
+    pub data_as_of: String,
+    #[serde(default)]
+    pub produced_at: Option<String>,
+    #[serde(default)]
+    pub producer: Option<String>,
+    #[serde(default)]
+    pub ts_column: Option<String>,
+    #[serde(default)]
+    pub rows_24h: Option<i64>,
+    #[serde(default)]
+    pub min_ts: Option<String>,
+    #[serde(default)]
+    pub max_ts: Option<String>,
+    /// Planner estimate, not an exact count.
+    #[serde(default)]
+    pub row_count_estimate: Option<i64>,
+    #[serde(default)]
+    pub schema_hash: Option<String>,
+    #[serde(default)]
+    pub fingerprint: Option<String>,
+}
+
+/// `GET /manifests`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ManifestsResponse {
+    pub manifests: Vec<DatasetManifest>,
+    pub count: u32,
+    #[serde(default)]
+    pub dataset: Option<String>,
+    #[serde(default)]
+    pub methodology_version: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// Query for `GET /tokens/search`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TokenSearchParams {
+    /// 1–64 chars: symbol, name or mint prefix.
+    pub q: String,
+    /// 1–50 (default 10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// One `GET /tokens/search` hit.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenSearchResult {
+    pub mint: String,
+    #[serde(default)]
+    pub symbol: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// How the query matched (e.g. exact symbol, prefix, name).
+    #[serde(rename = "match", default)]
+    pub match_kind: Option<String>,
+    #[serde(default)]
+    pub market_cap_usd: Option<f64>,
+    #[serde(default)]
+    pub liquidity_usd: Option<f64>,
+    #[serde(default)]
+    pub primary_dex: Option<String>,
+    #[serde(default)]
+    pub last_trade_at: Option<String>,
+    #[serde(default)]
+    pub image_url: Option<String>,
+    #[serde(default)]
+    pub twitter: Option<String>,
+    #[serde(default)]
+    pub website: Option<String>,
+}
+
+/// `GET /tokens/search`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenSearchResponse {
+    pub q: String,
+    pub count: u32,
+    pub results: Vec<TokenSearchResult>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+// ── Top traders (PRO+) ───────────────────────────────────────────────────────
+
+/// Query for `GET /tokens/{mint}/top-traders`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TopTradersParams {
+    /// Capped per tier (PRO / ULTRA).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
+    /// "pnl" (default) | "roi".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window_days: Option<u32>,
+    /// Default 0.1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_bought_sol: Option<f64>,
+}
+
+/// One ranked trader.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TopTrader {
+    pub rank: u32,
+    pub wallet: String,
+    pub trades: u64,
+    pub buys: u64,
+    pub sells: u64,
+    pub bought_sol: f64,
+    pub sold_sol: f64,
+    pub realized_pnl_sol: f64,
+    pub unrealized_pnl_sol: f64,
+    pub total_pnl_sol: f64,
+    pub held_value_sol: f64,
+    #[serde(default)]
+    pub roi: Option<f64>,
+    #[serde(default)]
+    pub still_holding: Option<bool>,
+    pub first_trade_at: String,
+    pub last_trade_at: String,
+    pub is_kol: bool,
+    #[serde(default)]
+    pub kol_name: Option<String>,
+    #[serde(default)]
+    pub is_alpha_tracked: bool,
+    #[serde(default)]
+    pub bot_confidence: Option<String>,
+    #[serde(default)]
+    pub historical_win_rate: Option<f64>,
+    #[serde(default)]
+    pub historical_pnl_sol: Option<f64>,
+    #[serde(default)]
+    pub historical_tokens: Option<u64>,
+}
+
+/// `summary` on top traders.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TopTradersSummary {
+    pub returned: u32,
+    pub known_kols: u32,
+    pub known_alpha_wallets: u32,
+    pub net_realized_pnl_sol: f64,
+}
+
+/// `GET /tokens/{mint}/top-traders`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TopTradersResponse {
+    pub mint: String,
+    pub sort: String,
+    pub window_days: u32,
+    pub traders: Vec<TopTrader>,
+    pub summary: TopTradersSummary,
+    #[serde(default)]
+    pub coverage: Option<TokenTradesCoverage>,
+}
+
+// ── Wallet batch / flags / funding / list score ──────────────────────────────
+
+/// Body for `POST /wallet/batch/trades`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct WalletBatchTradesParams {
+    /// 1–50 base58 wallets.
+    pub wallets: Vec<String>,
+    /// Unix seconds; only trades strictly after. Default / floor: 90 days ago.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<i64>,
+    /// 1–100 (default 20), newest first.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_per_wallet: Option<u32>,
+    /// "buy" | "sell".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+}
+
+/// One trade on `POST /wallet/batch/trades`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletBatchTrade {
+    pub tx_signature: String,
+    pub token_mint: String,
+    pub action: String,
+    pub sol_amount: f64,
+    pub token_amount: f64,
+    /// Executed price (SOL per token); null for dust / zero-SOL legs.
+    #[serde(default)]
+    pub price_sol: Option<f64>,
+    #[serde(default)]
+    pub price_usd: Option<f64>,
+    /// Canonical pool price near the trade — NOT this trade's price.
+    #[serde(default)]
+    pub market_price_sol: Option<f64>,
+    #[serde(default)]
+    pub market_price_usd: Option<f64>,
+    pub block_time: i64,
+    pub traded_at: String,
+}
+
+/// Per-wallet block on `POST /wallet/batch/trades`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletBatchTradesEntry {
+    pub wallet: String,
+    pub count: u32,
+    pub trades: Vec<WalletBatchTrade>,
+}
+
+/// `coverage` on `POST /wallet/batch/trades`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletBatchTradesCoverage {
+    #[serde(default)]
+    pub history_start_days: Option<u32>,
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// `POST /wallet/batch/trades`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletBatchTradesResponse {
+    pub wallets: Vec<WalletBatchTradesEntry>,
+    pub since: i64,
+    /// Pass back as `since` to page forward.
+    pub next_since: i64,
+    pub limit_per_wallet: u32,
+    #[serde(default)]
+    pub coverage: Option<WalletBatchTradesCoverage>,
+}
+
+/// Query for `GET /wallet/{address}/flags`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct WalletFlagsParams {
+    /// ISO-8601 with offset; default now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub as_of: Option<String>,
+    /// "true" to include the raw snapshot history.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<String>,
+}
+
+/// One source's state on `GET /wallet/{address}/flags`. The source's own flag
+/// fields are kept in `flags`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletFlagSource {
+    pub snapshot_at: String,
+    pub active: bool,
+    /// true = recorded before `as_of` and unchanged by then.
+    pub carried: bool,
+    #[serde(flatten)]
+    pub flags: HashMap<String, serde_json::Value>,
+}
+
+/// One raw snapshot (`history=true`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletFlagSnapshot {
+    pub source: String,
+    pub flags: HashMap<String, serde_json::Value>,
+    pub snapshot_at: String,
+}
+
+/// `GET /wallet/{address}/flags` — point-in-time reputation flags.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletFlagsResponse {
+    pub wallet: String,
+    pub as_of: String,
+    /// Sources active at `as_of`.
+    pub flagged: Vec<String>,
+    /// Per source; null = no snapshot at or before `as_of`.
+    pub sources: HashMap<String, Option<WalletFlagSource>>,
+    #[serde(default)]
+    pub funding: Option<serde_json::Value>,
+    #[serde(default)]
+    pub history: Option<Vec<WalletFlagSnapshot>>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// Query for `GET /wallet/{address}/funding`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct WalletFundingParams {
+    /// 1–20 (default 10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// 0–100.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
+}
+
+/// A transaction reference in funding evidence.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FundingTx {
+    pub tx: String,
+    #[serde(default)]
+    pub explorer_url: Option<String>,
+}
+
+/// An aggregated funding link (funder → recipient, one asset).
+#[derive(Debug, Clone, Deserialize)]
+pub struct FundingTransferLink {
+    pub asset: String,
+    #[serde(default)]
+    pub symbol: Option<String>,
+    #[serde(default)]
+    pub decimals: Option<u32>,
+    /// Raw integer amount as a string (no precision loss).
+    pub amount_raw: String,
+    #[serde(default)]
+    pub amount: Option<String>,
+    pub transfer_count: u64,
+    #[serde(default)]
+    pub first_seen: Option<String>,
+    #[serde(default)]
+    pub last_seen: Option<String>,
+    #[serde(default)]
+    pub transactions: Vec<FundingTx>,
+}
+
+/// `funder_label` on a shared funder.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FundingFunderLabel {
+    pub label: String,
+    pub category: String,
+    #[serde(default)]
+    pub verified: Option<bool>,
+}
+
+/// Another tracked wallet funded by the same funder.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FundingConnectedWallet {
+    pub address: String,
+    #[serde(default)]
+    pub explorer_url: Option<String>,
+    #[serde(default)]
+    pub tracked_as: Vec<String>,
+    #[serde(default)]
+    pub transfers: Vec<FundingTransferLink>,
+}
+
+/// One shared funder of the wallet.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FundingSharedFunder {
+    pub funder: String,
+    #[serde(default)]
+    pub funder_explorer_url: Option<String>,
+    #[serde(default)]
+    pub funder_label: Option<FundingFunderLabel>,
+    /// Exchange / service funder: a common source, not a connection signal.
+    #[serde(default)]
+    pub service_funder: bool,
+    #[serde(default)]
+    pub to_this_wallet: Vec<FundingTransferLink>,
+    #[serde(default)]
+    pub connected_wallets: Vec<FundingConnectedWallet>,
+}
+
+/// Pagination over `shared_funders`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FundingPagination {
+    pub limit: u32,
+    pub offset: u32,
+    pub total: u64,
+    pub has_more: bool,
+}
+
+/// `GET /wallet/{address}/funding` — shared-funder evidence (PRO+). Evidence of a
+/// funding connection, not proof of common ownership.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletFundingResponse {
+    pub chain: String,
+    pub chain_id: String,
+    pub native_asset: String,
+    pub address: String,
+    /// "ok" | "partial_coverage" | "not_tracked" | "not_started" | "collection_disabled" | "collection_stale".
+    pub status: String,
+    pub summary: String,
+    pub shared_funders: Vec<FundingSharedFunder>,
+    pub pagination: FundingPagination,
+    /// Collector coverage (mode, heartbeat, tracked intervals, known gaps).
+    pub coverage: serde_json::Value,
+    pub disclaimer: String,
+    /// Direct funding facts (PRO); `relationships` inside it are ULTRA+.
+    #[serde(default)]
+    pub direct_funding: Option<serde_json::Value>,
+}
+
+/// Body for `POST /wallet-list/score`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct WalletListScoreParams {
+    /// 1–200 base58 wallets.
+    pub wallets: Vec<String>,
+}
+
+/// Reputation flags on a scored wallet.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletListReputation {
+    pub is_sniper: bool,
+    pub is_bundler: bool,
+    pub is_dumper: bool,
+    pub is_kol: bool,
+    #[serde(default)]
+    pub kol_name: Option<String>,
+    #[serde(default)]
+    pub bot_confidence: Option<String>,
+}
+
+/// One wallet on `POST /wallet-list/score`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletListScoreEntry {
+    pub address: String,
+    /// "scored" | "no_trades" | "not_computed".
+    pub status: String,
+    /// 0–100; null when not scored or no closed positions.
+    #[serde(default)]
+    pub score: Option<f64>,
+    /// The wallet PnL summary (same shape as GET /wallet/{address}/pnl `summary`).
+    #[serde(default)]
+    pub pnl: Option<serde_json::Value>,
+    pub reputation: WalletListReputation,
+    #[serde(default)]
+    pub cache_hit: Option<bool>,
+    #[serde(default)]
+    pub computed_at: Option<String>,
+    #[serde(default)]
+    pub cache_age_seconds: Option<u64>,
+    /// Why it was not computed (live-compute cap).
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+/// `POST /wallet-list/score` (ENTERPRISE).
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletListScoreResponse {
+    pub wallets: Vec<WalletListScoreEntry>,
+    pub count: u32,
+    pub scored: u32,
+    pub cached: u32,
+    pub computed_now: u32,
+    pub no_trades: u32,
+    pub not_computed: u32,
+    pub max_wallets: u32,
+    pub max_live_compute: u32,
+    pub score_methodology: String,
+    pub as_of: String,
+}
+
+/// A deprecated-parameter disclosure on `GET /tokens`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ParamDeprecation {
+    pub param: String,
+    pub status: String,
+    #[serde(default)]
+    pub matches: Option<String>,
+    #[serde(default)]
+    pub replacement: Option<String>,
 }

@@ -1,5 +1,6 @@
 pub mod alpha;
 pub mod coordination_alerts;
+pub mod copytrade;
 pub mod deployer;
 pub mod first_touch_subscriptions;
 pub mod kol;

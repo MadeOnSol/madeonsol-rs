@@ -44,7 +44,7 @@ impl Webhooks {
     }
 
     /// Send a test payload to a webhook.
-    pub async fn test(&self, webhook_id: i64) -> Result<serde_json::Value> {
+    pub async fn test(&self, webhook_id: i64) -> Result<WebhookTestResponse> {
         let body = serde_json::json!({ "webhook_id": webhook_id });
         self.core.post_json("/webhooks/test", &body).await
     }
