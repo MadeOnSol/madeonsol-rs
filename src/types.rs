@@ -250,10 +250,20 @@ impl CoordinationDeliveryMode {
 pub struct KolFeedParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
-    /// Cursor — return trades strictly older than this ISO 8601 timestamp.
-    /// Pass `next_before` from the previous response for polling.
+    /// LEGACY cursor — return trades strictly older than this ISO 8601
+    /// timestamp (skips same-timestamp rows). Prefer `cursor`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub before: Option<String>,
+    /// PREFERRED pagination: `next_cursor` from the previous page — opaque
+    /// strict (traded_at, id) keyset. Cannot be combined with `before`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    /// Poll cursor — only trades strictly newer than this ISO time (feed back `next_since`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    /// `"token"` embeds the `/token/{mint}` snapshot on each row (≤ 20 distinct mints per page).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<KolAction>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -288,6 +298,9 @@ pub struct KolLeaderboardParams {
     pub min_winrate: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
+    /// Offset into the ranked universe (0–10000); see `KolLeaderboardResponse::universe`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -379,6 +392,48 @@ pub struct KolTrade {
     pub deployer: Option<KolTradeDeployer>,
     #[serde(default)]
     pub deployer_tier: Option<String>,
+    /// `include=token` only — the `/token/{mint}` snapshot (`None` past the 20-mint cap).
+    #[serde(default)]
+    pub token: Option<TokenResponseBody>,
+}
+
+/// Free (BASIC) tier 5-minute delay metadata — present only on delayed feed
+/// responses (flattened into the feed response types; all `None` on paid keys).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct FreeTierDelayMeta {
+    /// e.g. `"5m"`.
+    #[serde(default)]
+    pub delay: Option<String>,
+    #[serde(default)]
+    pub delay_seconds: Option<u64>,
+    /// The delayed cutoff the page was served at.
+    #[serde(default)]
+    pub as_of: Option<String>,
+    #[serde(default)]
+    pub delay_note: Option<String>,
+    /// Pricing URL.
+    #[serde(default)]
+    pub upgrade: Option<String>,
+}
+
+/// Present when a filter was applied after the candidate fetch.
+/// `scan_truncated: true` means more matches MAY exist past `next_cursor`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeedScanInfo {
+    pub post_filtered: bool,
+    pub scanned: u64,
+    pub scan_truncated: bool,
+    pub scan_budget: u64,
+}
+
+/// `include_truncated` on the KOL feed — present only when `include=token`
+/// hit the 20-distinct-mint cap.
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolFeedIncludeTruncated {
+    #[serde(default)]
+    pub token: Vec<String>,
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -387,9 +442,42 @@ pub struct KolFeedResponse {
     pub count: u32,
     #[serde(default)]
     pub data_age_seconds: Option<u64>,
-    /// Cursor for the next page — pass as `before` to fetch older trades.
+    /// LEGACY strict timestamp cursor (skips same-timestamp siblings) — pass
+    /// as `before`. Prefer `next_cursor`.
     #[serde(default)]
     pub next_before: Option<String>,
+    /// Pass as `cursor` for the next (older) page; `None` at the end.
+    #[serde(default)]
+    pub next_cursor: Option<String>,
+    /// `false` only when the candidate feed is exhausted — never inferred
+    /// from a short filtered page. `None` on older servers.
+    #[serde(default)]
+    pub has_more: Option<bool>,
+    /// Present when a filter was applied after the candidate fetch.
+    #[serde(default)]
+    pub scan: Option<FeedScanInfo>,
+    /// Poll cursor — pass as `since` to fetch only newer rows.
+    #[serde(default)]
+    pub next_since: Option<String>,
+    /// Echo of the `since` parameter.
+    #[serde(default)]
+    pub since: Option<String>,
+    /// WebSocket channel (`kol:trades`) that pushes the same rows.
+    #[serde(default)]
+    pub stream: Option<StreamPointer>,
+    /// Present only when `include=` was honoured (e.g. `["token"]`).
+    #[serde(default)]
+    pub included: Option<Vec<String>>,
+    /// Present only when `include=token` hit the 20-distinct-mint cap.
+    #[serde(default)]
+    pub include_truncated: Option<KolFeedIncludeTruncated>,
+    /// Present only when an unknown `include=` value was sent
+    /// (`{ "<value>": { "status": 400, "error": "..." } }`).
+    #[serde(default)]
+    pub include_errors: Option<HashMap<String, serde_json::Value>>,
+    /// Free-tier delay fields (all `None` on paid keys).
+    #[serde(flatten)]
+    pub delay: FreeTierDelayMeta,
     #[serde(default, rename = "_rid")]
     pub _rid: Option<String>,
 }
@@ -435,14 +523,57 @@ pub struct KolLeaderboardEntry {
     /// Percentile rank for early-entry rate over the trailing 30 days (0–100).
     #[serde(default)]
     pub percentile_early_entry_30d: Option<f64>,
+    /// Number of buys with a known entry MC in the period; `None` when that
+    /// read failed (`entry_mc_complete: false`).
+    #[serde(default)]
+    pub entry_mc_samples: Option<u64>,
+    /// Average entry market cap (USD) over the period; `None` when unknown.
+    #[serde(default)]
+    pub avg_entry_mc_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolLeaderboardPagination {
+    pub limit: u32,
+    pub offset: u32,
+    pub returned: u32,
+    /// Entries in the filtered universe.
+    pub total: u32,
+    pub has_more: bool,
+}
+
+/// The fixed ranked set pagination walks (top KOLs by realized PnL for the period).
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolLeaderboardUniverse {
+    pub kind: String,
+    pub period: String,
+    pub max_size: u32,
+    pub size: u32,
+    pub note: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct KolLeaderboardResponse {
     pub leaderboard: Vec<KolLeaderboardEntry>,
+    #[serde(default)]
+    pub pagination: Option<KolLeaderboardPagination>,
+    #[serde(default)]
+    pub universe: Option<KolLeaderboardUniverse>,
+    /// Start of the entry-MC aggregation window (ISO).
+    #[serde(default)]
+    pub entry_mc_window_start: Option<String>,
+    /// `false` when the entry-MC read failed (entry MC fields are then `None`).
+    #[serde(default)]
+    pub entry_mc_complete: Option<bool>,
     pub period: String,
     #[serde(default)]
     pub sort: Option<String>,
+    /// Echo — present only when the filter was sent.
+    #[serde(default)]
+    pub strategy: Option<String>,
+    /// Echo — present only when the filter was sent.
+    #[serde(default)]
+    pub min_winrate: Option<f64>,
     #[serde(default, rename = "_rid")]
     pub _rid: Option<String>,
 }
@@ -1278,9 +1409,14 @@ pub struct FirstTouchesParams {
     /// ISO datetime — events strictly newer than this. Polling cursor.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub since: Option<String>,
-    /// ISO datetime — events strictly older than this. Pagination cursor.
+    /// ISO datetime — events strictly older than this. LEGACY pagination
+    /// (skips same-timestamp rows); prefer `cursor`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub before: Option<String>,
+    /// PREFERRED pagination: `next_cursor` from the previous page — opaque
+    /// strict keyset. Cannot be combined with `before`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
     /// 1–100. Default: 50 (BASIC capped at 20).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
@@ -1367,8 +1503,32 @@ pub struct FirstTouchEvent {
 pub struct FirstTouchesResponse {
     pub events: Vec<FirstTouchEvent>,
     pub count: u32,
+    /// LEGACY strict timestamp cursor — prefer `next_cursor`.
+    #[serde(default)]
     pub next_before: Option<String>,
+    /// Pass as `cursor` for the next (older) page; `None` at the end.
+    #[serde(default)]
+    pub next_cursor: Option<String>,
+    /// `false` only when the candidate feed is exhausted. `None` on older servers.
+    #[serde(default)]
+    pub has_more: Option<bool>,
+    /// Present when a filter was applied after the candidate fetch.
+    #[serde(default)]
+    pub scan: Option<FeedScanInfo>,
+    /// Poll cursor — pass as `since` for only-newer rows.
+    #[serde(default)]
+    pub next_since: Option<String>,
+    /// Echo of the `since` parameter.
+    #[serde(default)]
+    pub since: Option<String>,
+    #[serde(default)]
     pub data_age_seconds: Option<u32>,
+    /// WebSocket channel (`kol:first_touches`) that pushes the same rows.
+    #[serde(default)]
+    pub stream: Option<StreamPointer>,
+    /// Free-tier delay fields (all `None` on paid keys).
+    #[serde(flatten)]
+    pub delay: FreeTierDelayMeta,
     #[serde(default, rename = "_rid")]
     pub _rid: Option<String>,
 }
@@ -1498,10 +1658,17 @@ pub struct DeployerTokensParams {
 pub struct DeployerAlertsParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub since: Option<String>,
-    /// Cursor — return alerts strictly older than this ISO 8601 timestamp.
-    /// Pass `next_before` from previous response. Preferred over `offset` at scale.
+    /// LEGACY cursor — return alerts strictly older than this ISO 8601
+    /// timestamp (skips same-timestamp siblings). Prefer `cursor`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub before: Option<String>,
+    /// PREFERRED pagination: `next_cursor` from the previous page — opaque
+    /// strict (created_at, id) keyset. Not combinable with `before` / `offset`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    /// Only alerts for this token mint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_mint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1595,6 +1762,12 @@ pub struct DeployerSummary {
     pub labeled_tokens: Option<i64>,
     #[serde(default)]
     pub avg_time_to_bond_minutes: Option<i64>,
+    /// Populated on alert rows.
+    #[serde(default)]
+    pub instant_bonds: Option<i64>,
+    /// Count of labeled tokens that ran. Populated on alert rows.
+    #[serde(default)]
+    pub runner_tokens: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1654,6 +1827,130 @@ pub struct DeployerToken {
     pub peak_market_cap_usd: Option<f64>,
 }
 
+/// A LaunchLab (bonk) / bags token from our own DB on `GET /deployer-hunter/{wallet}`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerLaunchpadToken {
+    pub mint: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub symbol: Option<String>,
+    /// e.g. `"launchlab"` (bonk) | `"bags"`.
+    pub launchpad: String,
+    /// Graduated / bonded.
+    pub complete: bool,
+    pub deployed_at: String,
+    #[serde(default)]
+    pub bonded_at: Option<String>,
+    #[serde(default)]
+    pub peak_market_cap: Option<f64>,
+}
+
+/// The `deployer` row inside [`DeployerProfileResponse`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerProfileRow {
+    pub id: String,
+    pub wallet_address: String,
+    #[serde(default)]
+    pub total_tokens_deployed: Option<i64>,
+    #[serde(default)]
+    pub total_bonded: Option<i64>,
+    #[serde(default)]
+    pub instant_bonds: Option<i64>,
+    #[serde(default)]
+    pub bonding_rate: Option<f64>,
+    #[serde(default)]
+    pub recent_bond_rate: Option<f64>,
+    #[serde(default)]
+    pub tier: Option<DeployerTier>,
+    #[serde(default)]
+    pub is_tracked: Option<bool>,
+    #[serde(default)]
+    pub avg_time_to_bond_minutes: Option<f64>,
+    #[serde(default)]
+    pub best_token_peak_mc: Option<f64>,
+    #[serde(default)]
+    pub avg_peak_mc: Option<f64>,
+    /// Raw DB column (shape not guaranteed).
+    #[serde(default)]
+    pub recent_outcomes: Option<serde_json::Value>,
+    /// Fraction of labeled tokens that ran (peak ≥ 60 min). Gate on `labeled_tokens` ≥ 3.
+    #[serde(default)]
+    pub runner_rate: Option<f64>,
+    #[serde(default)]
+    pub runner_tokens: Option<i64>,
+    #[serde(default)]
+    pub labeled_tokens: Option<i64>,
+    #[serde(default)]
+    pub post_bond_survival_rate: Option<f64>,
+    #[serde(default)]
+    pub post_bond_2x_rate: Option<f64>,
+    #[serde(default)]
+    pub post_bond_labeled_count: Option<i64>,
+    #[serde(default)]
+    pub first_seen_at: Option<String>,
+    #[serde(default)]
+    pub last_deploy_at: Option<String>,
+    #[serde(default)]
+    pub last_bond_at: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+/// `pump_stats` on [`DeployerProfileResponse`] — aggregated from the live
+/// pump.fun API (not our DB).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeployerPumpStats {
+    pub total: u64,
+    pub bonded: u64,
+    pub bonding_rate: f64,
+    #[serde(default)]
+    pub best_ath_mc: Option<f64>,
+    #[serde(default)]
+    pub avg_ath_mc: Option<f64>,
+}
+
+/// `GET /deployer-hunter/{wallet}` — what `client.deployer().profile()` returns.
+/// The route has always nested the deployer row under `deployer` (`None` with
+/// `is_deployer: false` for an untracked wallet); the earlier flat
+/// [`DeployerProfile`] could not deserialize any answer.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerProfileResponse {
+    pub is_deployer: bool,
+    /// Only on the `is_deployer: false` answer.
+    #[serde(default)]
+    pub wallet: Option<String>,
+    #[serde(default)]
+    pub deployer: Option<DeployerProfileRow>,
+    /// `None` when not a deployer.
+    #[serde(default)]
+    pub pump_stats: Option<DeployerPumpStats>,
+    /// Raw pump.fun API token list (pump.fun-launched tokens only).
+    #[serde(default)]
+    pub pump_tokens: Vec<serde_json::Value>,
+    /// `true` when the pump.fun API read failed (`pump_tokens` is then empty);
+    /// `None` on the not-a-deployer answer.
+    #[serde(default)]
+    pub pump_error: Option<bool>,
+    /// Our own LaunchLab/bonk + bags tokens for this deployer.
+    #[serde(default)]
+    pub launchpad_tokens: Vec<DeployerLaunchpadToken>,
+    /// PRO+ funding evidence; absent below PRO or when the feature is off.
+    #[serde(default)]
+    pub funding: Option<serde_json::Value>,
+    #[serde(default)]
+    pub funding_features: Option<serde_json::Value>,
+    /// PRO+ capital intelligence; absent when disabled.
+    #[serde(default)]
+    pub capital_intelligence: Option<serde_json::Value>,
+    #[serde(default, rename = "_rid")]
+    pub _rid: Option<String>,
+}
+
+/// Not what `GET /deployer-hunter/{wallet}` returns — use [`DeployerProfileResponse`].
+/// Kept for source compatibility.
+#[deprecated(note = "not the wire shape of GET /deployer-hunter/{wallet}; use DeployerProfileResponse")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeployerProfile {
     pub wallet: String,
@@ -1708,6 +2005,9 @@ pub struct DeployerAlert {
     /// Deployer wallet's SOL balance at alert time, in SOL. `None` when unknown.
     #[serde(default)]
     pub deployer_sol_balance: Option<f64>,
+    /// Launchpad the token was deployed on.
+    #[serde(default)]
+    pub launchpad: Option<String>,
     pub deployers: DeployerSummary,
     #[serde(default)]
     pub kol_buys: Option<KolBuysSummary>,
@@ -1718,11 +2018,27 @@ pub struct DeployerAlertsResponse {
     pub alerts: Vec<DeployerAlert>,
     pub limit: u32,
     pub offset: u32,
-    /// Cursor for the next page — pass as `before` to fetch older alerts.
+    /// LEGACY strict timestamp cursor — pass as `before`. Prefer `next_cursor`.
     #[serde(default)]
     pub next_before: Option<String>,
+    /// Pass as `cursor` for the next (older) page; `None` at the end.
+    #[serde(default)]
+    pub next_cursor: Option<String>,
+    /// `false` only when the candidate feed is exhausted. `None` on older servers.
+    #[serde(default)]
+    pub has_more: Option<bool>,
+    /// `false` only if `kol_buys` could not be aggregated exactly (counts are
+    /// then lower bounds).
+    #[serde(default)]
+    pub kol_buys_complete: Option<bool>,
+    /// Present with `min_kol_buys`.
+    #[serde(default)]
+    pub scan: Option<FeedScanInfo>,
     #[serde(default)]
     pub data_age_seconds: Option<u64>,
+    /// Free-tier delay fields (all `None` on paid keys).
+    #[serde(flatten)]
+    pub delay: FreeTierDelayMeta,
     #[serde(default, rename = "_rid")]
     pub _rid: Option<String>,
 }
@@ -5267,12 +5583,20 @@ pub struct WalletEntry {
     pub added_at: String,
 }
 
+/// `POST /wallet-tracker/watchlist` (201) — the inserted row under `wallet`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct WatchlistAddResponse {
-    pub wallet_address: String,
-    pub label: Option<String>,
-    pub added_at: String,
-    pub remaining: u32,
+    pub wallet: WalletEntry,
+    #[serde(default, rename = "_rid")]
+    pub _rid: Option<String>,
+}
+
+/// `PATCH /wallet-tracker/watchlist/{address}` — the updated row under `wallet`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WatchlistUpdateResponse {
+    pub wallet: WalletEntry,
+    #[serde(default, rename = "_rid")]
+    pub _rid: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -5352,8 +5676,11 @@ pub struct WalletTrackerSummaryResponse {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+/// `DELETE /wallet-tracker/watchlist/{address}` — echoes the removed address.
 pub struct WalletTrackerDeleteResponse {
-    pub success: bool,
+    pub removed: String,
+    #[serde(default, rename = "_rid")]
+    pub _rid: Option<String>,
 }
 
 // ─── Sniper: deshred pre-confirm pump.fun deploy feed (PRO + ULTRA) ─────────
@@ -6157,8 +6484,20 @@ pub struct WebhookUpdateParams {
     pub events: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filters: Option<HashMap<String, serde_json::Value>>,
+    /// Pause (`false`) or resume (`true`). Resuming resets `consecutive_failures`.
+    /// (Replaces `status`, which the API never read.)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
+    pub is_active: Option<bool>,
+}
+
+/// Last-24 h delivery summary on `GET /webhooks` rows.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebhookDeliverySummary {
+    pub total_24h: u64,
+    pub success_24h: u64,
+    pub failed_24h: u64,
+    /// Percent, one decimal; 100 when there were no deliveries.
+    pub success_rate: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -6166,9 +6505,85 @@ pub struct Webhook {
     pub id: i64,
     pub url: String,
     pub events: Vec<String>,
+    #[serde(default)]
     pub filters: Option<HashMap<String, serde_json::Value>>,
-    pub status: String,
+    pub is_active: bool,
     pub created_at: String,
+    /// On list / get.
+    #[serde(default)]
+    pub last_delivered_at: Option<String>,
+    /// On list / get.
+    #[serde(default)]
+    pub consecutive_failures: Option<u32>,
+    /// On list only.
+    #[serde(default)]
+    pub delivery_summary: Option<WebhookDeliverySummary>,
+}
+
+/// The webhook row on `POST /webhooks` — the only response that carries `secret`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreatedWebhook {
+    pub id: i64,
+    pub url: String,
+    /// HMAC signing secret — shown once; store it.
+    pub secret: String,
+    pub events: Vec<String>,
+    #[serde(default)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
+    pub is_active: bool,
+    pub created_at: String,
+}
+
+/// `POST /webhooks` (201).
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebhookCreateResponse {
+    pub webhook: CreatedWebhook,
+    pub note: String,
+    #[serde(default, rename = "_rid")]
+    pub _rid: Option<String>,
+}
+
+/// One recent delivery on `GET /webhooks/{id}`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebhookDelivery {
+    pub event_type: String,
+    #[serde(default)]
+    pub status_code: Option<i64>,
+    #[serde(default)]
+    pub response_time_ms: Option<i64>,
+    pub delivered_at: String,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// `GET /webhooks/{id}`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebhookGetResponse {
+    pub webhook: Webhook,
+    #[serde(default)]
+    pub recent_deliveries: Vec<WebhookDelivery>,
+    #[serde(default, rename = "_rid")]
+    pub _rid: Option<String>,
+}
+
+/// The row on `PATCH /webhooks/{id}` (no `created_at`; carries `updated_at`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdatedWebhook {
+    pub id: i64,
+    pub url: String,
+    pub events: Vec<String>,
+    #[serde(default)]
+    pub filters: Option<HashMap<String, serde_json::Value>>,
+    pub is_active: bool,
+    pub updated_at: String,
+}
+
+/// `PATCH /webhooks/{id}`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebhookUpdateResponse {
+    pub webhook: UpdatedWebhook,
+    #[serde(default, rename = "_rid")]
+    pub _rid: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -6179,8 +6594,11 @@ pub struct WebhookListResponse {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+/// `DELETE /webhooks/{id}`.
 pub struct WebhookDeleteResponse {
-    pub success: bool,
+    pub deleted: bool,
+    #[serde(default, rename = "_rid")]
+    pub _rid: Option<String>,
 }
 
 // ─── /me — v0.8 (server-side v1.7, 2026-05-12) ───────────────────────────────

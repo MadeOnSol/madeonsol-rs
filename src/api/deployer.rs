@@ -27,7 +27,11 @@ impl Deployer {
     }
 
     /// Full profile for a single deployer wallet.
-    pub async fn profile(&self, wallet: &str) -> Result<DeployerProfile> {
+    ///
+    /// Returns the wire shape: `is_deployer`, the `deployer` row (`None` for an
+    /// untracked wallet), `pump_stats` / `pump_tokens` / `pump_error`,
+    /// `launchpad_tokens` and PRO+ `funding` blocks.
+    pub async fn profile(&self, wallet: &str) -> Result<DeployerProfileResponse> {
         self.core
             .get(&format!("/deployer-hunter/{}", wallet), &())
             .await
