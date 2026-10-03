@@ -220,4 +220,51 @@ mod tests {
         assert!(old.rotated.is_none());
         assert!(old.lifetime.is_none());
     }
+
+    /// Regression (2026-10-03 parity): the route nests the figures under
+    /// `consensus`; the old flat type required a top-level `total_kol_buyers`
+    /// and failed on every answer with KOL trades.
+    #[test]
+    fn kol_consensus_deserializes_nested_and_empty() {
+        let r: crate::types::KolConsensusResponse = serde_json::from_str(
+            r#"{"mint":"M","current_mc_usd":1000.5,"current_price_usd":null,
+                "consensus":{"total_kol_buyers":3,"total_kol_sellers":1,"kol_exit_rate":0.33,
+                "kol_any_sell_rate":0.33,"kol_exit_rate_definition":"x","complete":true,
+                "truncated":false,"rows_scanned":12,"total_trades":12,"net_flow_sol":1.5,
+                "total_buy_sol":2.0,"total_sell_sol":0.5,"first_kol_buy_at":null,
+                "last_kol_buy_at":null,"first_touch_wallet":null,"first_touch_at":null,
+                "median_entry_mc_usd":null}}"#,
+        )
+        .unwrap();
+        assert_eq!(r.consensus.unwrap().total_kol_buyers, 3);
+        let empty: crate::types::KolConsensusResponse = serde_json::from_str(
+            r#"{"mint":"M","consensus":null,"total_kol_buyers":0,"total_kol_sellers":0,"complete":true}"#,
+        )
+        .unwrap();
+        assert!(empty.consensus.is_none());
+        assert_eq!(empty.total_kol_buyers, Some(0));
+    }
+
+    #[test]
+    fn peak_history_deserializes_nested() {
+        let r: crate::types::PeakHistoryResponse = serde_json::from_str(
+            r#"{"mint":"M","found":true,"token":{"name":"n","symbol":"S","image_url":null},
+                "peak_history":{"peak_mc_usd":5000.0,"bonded_at":null,"mc_tracking_complete":true}}"#,
+        )
+        .unwrap();
+        assert_eq!(r.peak_history.unwrap().peak_mc_usd, Some(5000.0));
+        let nf: crate::types::PeakHistoryResponse =
+            serde_json::from_str(r#"{"mint":"M","found":false,"peak_history":null}"#).unwrap();
+        assert!(!nf.found && nf.peak_history.is_none());
+    }
+
+    #[test]
+    fn coverage_size_floor() {
+        let c: crate::types::TradeCoverage = serde_json::from_str(
+            r#"{"history_start":1775952000,"scope":"launchpad pipeline","in_scope":true,
+                "size_floor":{"min_sol":0.05,"min_stable_usd":3.5,"applies_to":"buys"}}"#,
+        )
+        .unwrap();
+        assert_eq!(c.size_floor.unwrap().min_sol, 0.05);
+    }
 }

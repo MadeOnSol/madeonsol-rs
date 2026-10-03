@@ -1003,12 +1003,53 @@ pub struct CoordinationHistoryParams {
 
 // ─── KOL consensus (v1.9) ──────────────────────────────────────────────────
 
+/// `GET /tokens/{mint}/kol-consensus`.
+///
+/// FIX (2026-10-03 parity): the figures are nested under `consensus` — that
+/// is what the route has always returned. Earlier versions of this type
+/// declared them at the top level with required `total_kol_buyers`, so every
+/// answer with KOL trades failed to deserialize. With no KOL trades:
+/// `consensus: None`, `total_kol_buyers: Some(0)`, `complete: Some(true)`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct KolConsensusResponse {
+    pub mint: String,
+    #[serde(default)]
+    pub current_mc_usd: Option<f64>,
+    #[serde(default)]
+    pub current_price_usd: Option<f64>,
+    #[serde(default)]
+    pub consensus: Option<KolConsensus>,
+    /// Only on the no-trades answer (then 0).
+    #[serde(default)]
+    pub total_kol_buyers: Option<u32>,
+    #[serde(default)]
+    pub total_kol_sellers: Option<u32>,
+    #[serde(default)]
+    pub complete: Option<bool>,
+}
+
+/// The `consensus` block of [`KolConsensusResponse`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolConsensus {
     pub total_kol_buyers: u32,
     pub total_kol_sellers: u32,
+    /// Share of KOL buyers with >= 1 recorded sell (any size) — NOT a full exit.
     #[serde(default)]
     pub kol_exit_rate: Option<f64>,
+    /// Accurately named copy of `kol_exit_rate`.
+    #[serde(default)]
+    pub kol_any_sell_rate: Option<f64>,
+    #[serde(default)]
+    pub kol_exit_rate_definition: Option<String>,
+    /// `Some(false)` when the trade read hit its row ceiling.
+    #[serde(default)]
+    pub complete: Option<bool>,
+    #[serde(default)]
+    pub truncated: Option<bool>,
+    #[serde(default)]
+    pub rows_scanned: Option<u64>,
+    #[serde(default)]
+    pub total_trades: Option<u64>,
     pub net_flow_sol: f64,
     pub total_buy_sol: f64,
     pub total_sell_sol: f64,
@@ -1032,8 +1073,34 @@ pub struct KolConsensusResponse {
 
 // ─── Peak history (v1.9) ───────────────────────────────────────────────────
 
+/// `GET /tokens/{mint}/peak-history`.
+///
+/// FIX (2026-10-03 parity): the figures are nested under `peak_history`
+/// (`None` with `found: false` for an unknown mint). Earlier versions of this
+/// type declared them at the top level, where every field read `None`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PeakHistoryResponse {
+    pub mint: String,
+    pub found: bool,
+    #[serde(default)]
+    pub token: Option<PeakHistoryToken>,
+    #[serde(default)]
+    pub peak_history: Option<PeakHistory>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PeakHistoryToken {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub symbol: Option<String>,
+    #[serde(default)]
+    pub image_url: Option<String>,
+}
+
+/// The `peak_history` block of [`PeakHistoryResponse`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct PeakHistory {
     #[serde(default)]
     pub peak_mc_usd: Option<f64>,
     #[serde(default)]
@@ -1062,6 +1129,8 @@ pub struct PeakHistoryResponse {
     pub deployed_at: Option<String>,
     #[serde(default)]
     pub bonded_at: Option<String>,
+    #[serde(default)]
+    pub mc_tracking_complete: Option<bool>,
 }
 
 // ─── Coordination alerts (v1.1) ─────────────────────────────────────────────
@@ -3193,6 +3262,14 @@ pub struct TokenLock {
     /// Bonfida vesting account).
     pub lock_account: String,
     pub program: LockProgram,
+    /// Server 2026-10-02 — who runs the locker and how sure the server is.
+    /// `None` on older servers.
+    #[serde(default)]
+    pub provider: Option<TokenLockProvider>,
+    /// Server 2026-10-02 — Solana Explorer links for the lock account and the
+    /// creation tx.
+    #[serde(default)]
+    pub explorer: Option<TokenLockExplorer>,
     pub kind: LockKind,
     /// Derived at request time.
     pub status: LockStatus,
@@ -3210,6 +3287,11 @@ pub struct TokenLock {
     pub amount: Option<f64>,
     #[serde(default)]
     pub amount_usd: Option<f64>,
+    /// Server 2026-10-02 — the token price behind every `*_usd` field
+    /// (`None` when unknown, stale or phantom).
+    #[serde(default)]
+    pub price_usd: Option<f64>,
+    /// % of CURRENT supply; `None` when unknown or above 100.5.
     #[serde(default)]
     pub amount_pct_of_supply: Option<f64>,
     /// Still locked right now (amount − unlocked-so-far); `"0"` unless active.
@@ -3238,6 +3320,13 @@ pub struct TokenLock {
     /// Fully unlocked at; `None` = perpetual / no schedule.
     #[serde(default)]
     pub end_at: Option<String>,
+    /// Server 2026-10-02 — seconds until fully unlocked (>= 0); 0 once
+    /// completed; `None` when perpetual or cancelled / closed.
+    #[serde(default)]
+    pub seconds_until_end: Option<i64>,
+    /// Server 2026-10-02 — seconds until `next_unlock.at` (>= 0).
+    #[serde(default)]
+    pub seconds_until_next_unlock: Option<i64>,
     #[serde(default)]
     pub period_seconds: Option<i64>,
     /// `true` when period < 1h (per-second stream).
@@ -3255,6 +3344,9 @@ pub struct TokenLock {
     pub perpetual: bool,
     #[serde(default)]
     pub next_unlock: Option<LockNextUnlock>,
+    /// Bonfida vesting only: the tranche list (`None` on other programs).
+    #[serde(default)]
+    pub schedule: Option<Vec<TokenLockTranche>>,
     /// The locker can cancel — funds are locked against the recipient, not
     /// the locker. A cancelable lock is a weaker promise.
     #[serde(default)]
@@ -3278,6 +3370,45 @@ pub struct TokenLock {
     /// (the per-mint response carries one [`TokenLocksResponse::token`]).
     #[serde(default)]
     pub token: Option<LockTokenInfo>,
+}
+
+/// Who runs a lock contract, and how sure the server is (server 2026-10-02).
+/// `identity`: `"verified"` = a known provider deployment (by program id);
+/// `"compatible"` = only the shape matches a known provider
+/// (`compatible_with`), the operator is NOT identified; `"unverified"` =
+/// unknown program. `id` / `website_url` are `None` unless verified;
+/// `lock_url` is always `None` for the Solana providers (never guessed).
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenLockProvider {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    pub identity: String,
+    #[serde(default)]
+    pub compatible_with: Option<String>,
+    #[serde(default)]
+    pub website_url: Option<String>,
+    #[serde(default)]
+    pub lock_url: Option<String>,
+}
+
+/// Independent on-chain evidence on Solana Explorer (server 2026-10-02).
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenLockExplorer {
+    #[serde(default)]
+    pub lock_account_url: Option<String>,
+    #[serde(default)]
+    pub creation_tx_url: Option<String>,
+}
+
+/// One Bonfida vesting tranche ([`TokenLock::schedule`]).
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenLockTranche {
+    #[serde(default)]
+    pub release_at: Option<String>,
+    /// Base units as a decimal string.
+    pub amount_raw: String,
 }
 
 /// Roll-up over every contract on the mint (the `status` / `program` filters
@@ -3381,6 +3512,11 @@ pub struct TokenLocksFeedParams {
     /// (use `pagination.next_before`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub before: Option<String>,
+    /// Opaque `pagination.next_cursor` from the previous page: strict
+    /// (created_at, id) keyset, no repeats, no skips. Not combinable with
+    /// `before` (prefer this over `before`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mint: Option<String>,
     /// Creator / locker wallet.
@@ -3422,6 +3558,19 @@ pub struct TimeCursorPagination {
     pub next_since: Option<String>,
     #[serde(default)]
     pub next_before: Option<String>,
+    /// Locks feed — pass as `cursor` to page back without skipping
+    /// same-timestamp rows; `None` = end (or an older server).
+    #[serde(default)]
+    pub next_cursor: Option<String>,
+    /// Present when a post-filter (min_usd / min_pct_of_supply / status) was scanned.
+    #[serde(default)]
+    pub post_filtered: Option<bool>,
+    #[serde(default)]
+    pub scanned: Option<u64>,
+    #[serde(default)]
+    pub scan_truncated: Option<bool>,
+    #[serde(default)]
+    pub scan_budget: Option<u64>,
 }
 
 /// WebSocket pointer attached to feed responses that are also pushed live —
@@ -3449,6 +3598,10 @@ pub struct TokenLocksFeedResponse {
     #[serde(default)]
     pub locks: Vec<TokenLock>,
     pub pagination: TimeCursorPagination,
+    /// `"mint_facts:<table>"` when a per-mint enrichment read failed; those
+    /// rows' usd / ui / pct are `None` (unknown), not zero.
+    #[serde(default)]
+    pub degraded_fields: Option<Vec<String>>,
     #[serde(default)]
     pub stream: Option<StreamPointer>,
     #[serde(default)]
@@ -4796,6 +4949,33 @@ pub struct TokenTradesCoverage {
     /// human-readable explanation of what the coverage gap means.
     #[serde(default)]
     pub note: Option<String>,
+    /// Same value as `in_scope`: persisted rows exist (presence, not completeness).
+    #[serde(default)]
+    pub data_observed: Option<bool>,
+    /// Does the CURRENT capture gate admit this mint? (`"eligible"`,
+    /// `"lapsed"`, `"excluded"`, `"unknown"`, `"admitted_previously"`,
+    /// `"not_applicable"`; treat unknown values as `"unknown"`.)
+    #[serde(default)]
+    pub eligibility: Option<String>,
+    #[serde(default)]
+    pub eligibility_basis: Option<String>,
+    /// Always `"not_verified"`: rows existing never proves a complete interval.
+    #[serde(default)]
+    pub completeness: Option<String>,
+    /// Persistence size floor of the stored trade tape (server 2026-09-30).
+    #[serde(default)]
+    pub size_floor: Option<TradeSizeFloor>,
+}
+
+/// The stored trade tape drops buys under `min_sol` SOL (under
+/// `min_stable_usd` when paid in USDC/USDT); sells that RECEIVE SOL are kept
+/// at any size. Live streams, prices, market caps and candles are not subject
+/// to it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TradeSizeFloor {
+    pub min_sol: f64,
+    pub min_stable_usd: f64,
+    pub applies_to: String,
 }
 
 /// Preferred name for the coverage honesty block — it is no longer
@@ -5524,6 +5704,20 @@ pub struct WalletStatsResponse {
     /// empty `stats` block means "outside the write-gate", not "never traded".
     #[serde(default)]
     pub coverage: Option<TokenTradesCoverage>,
+    /// Server 2026-10-01 — `Some(true)` only when the 90-day aggregation
+    /// failed: `stats: None` is then UNKNOWN, not an inactive wallet.
+    #[serde(default)]
+    pub stats_unavailable: Option<bool>,
+    /// `Some(true)` only when one or more enrichment queries failed; see
+    /// `degraded_fields`.
+    #[serde(default)]
+    pub enrichment_unavailable: Option<bool>,
+    /// Enrichment blocks whose query failed (`"top_tokens"`,
+    /// `"trading_style"`, `"deployer_breakdown"`, `"recent_trades"`,
+    /// `"biggest_miss"` = `derived.biggest_miss`). Their empty / `None` value
+    /// is UNKNOWN, not "no data"; retry later.
+    #[serde(default)]
+    pub degraded_fields: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
