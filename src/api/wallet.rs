@@ -105,4 +105,49 @@ impl Wallet {
             .post_json("/wallet/batch/classify", &WalletBatchRequest { wallets })
             .await
     }
+    /// Point-in-time reputation flags (`GET /wallet/{address}/flags`): every
+    /// flag source's state at `as_of` (default now), optionally with the raw
+    /// snapshot history. PRO+.
+    pub async fn flags(
+        &self,
+        address: &str,
+        params: &WalletFlagsParams,
+    ) -> Result<WalletFlagsResponse> {
+        self.core
+            .get(&format!("/wallet/{}/flags", address), params)
+            .await
+    }
+
+    /// Shared-funder evidence for a tracked wallet
+    /// (`GET /wallet/{address}/funding`), forward-looking from monitoring start.
+    /// PRO+; cross-wallet relationship counts inside `direct_funding` are
+    /// ULTRA+. Evidence of a funding connection, not proof of common ownership.
+    pub async fn funding(
+        &self,
+        address: &str,
+        params: &WalletFundingParams,
+    ) -> Result<WalletFundingResponse> {
+        self.core
+            .get(&format!("/wallet/{}/funding", address), params)
+            .await
+    }
+
+    /// Recent trades for 1–50 wallets in one call (`POST /wallet/batch/trades`),
+    /// newest first per wallet; page forward with `next_since`. PRO+.
+    pub async fn batch_trades(
+        &self,
+        params: &WalletBatchTradesParams,
+    ) -> Result<WalletBatchTradesResponse> {
+        self.core.post_json("/wallet/batch/trades", params).await
+    }
+
+    /// Score a list of up to 200 wallets (`POST /wallet-list/score`): 0–100
+    /// score from win rate + profit factor, PnL summary and reputation flags.
+    /// At most 25 uncached wallets are computed live per call. ENTERPRISE.
+    pub async fn list_score(
+        &self,
+        params: &WalletListScoreParams,
+    ) -> Result<WalletListScoreResponse> {
+        self.core.post_json("/wallet-list/score", params).await
+    }
 }

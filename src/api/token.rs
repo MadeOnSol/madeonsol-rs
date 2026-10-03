@@ -421,4 +421,22 @@ impl Token {
     ) -> Result<AlmostBondedResponse> {
         self.core.get("/tokens/almost-bonded", params).await
     }
+    /// Token search by symbol, name or mint prefix (`GET /tokens/search`) over
+    /// the memecoin / launchpad universe we index. Every tier.
+    pub async fn search(&self, params: &TokenSearchParams) -> Result<TokenSearchResponse> {
+        self.core.get("/tokens/search", params).await
+    }
+
+    /// Ranked traders of one mint by PnL or ROI over `window_days`
+    /// (`GET /tokens/{mint}/top-traders`), enriched with KOL identity and
+    /// alpha-wallet history. PRO+ (row cap per tier).
+    pub async fn top_traders(
+        &self,
+        mint: &str,
+        params: &TopTradersParams,
+    ) -> Result<TopTradersResponse> {
+        self.core
+            .get(&format!("/tokens/{}/top-traders", mint), params)
+            .await
+    }
 }

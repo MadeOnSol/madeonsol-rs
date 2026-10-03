@@ -132,7 +132,7 @@ impl Kol {
     pub async fn scout_leaderboard(
         &self,
         params: &ScoutLeaderboardParams,
-    ) -> Result<serde_json::Value> {
+    ) -> Result<KolScoutLeaderboardResponse> {
         self.core.get("/kol/scouts/leaderboard", params).await
     }
 
@@ -141,7 +141,7 @@ impl Kol {
     pub async fn coordination_history(
         &self,
         params: &CoordinationHistoryParams,
-    ) -> Result<serde_json::Value> {
+    ) -> Result<KolCoordinationHistoryResponse> {
         self.core.get("/kol/coordination/history", params).await
     }
 
@@ -157,5 +157,11 @@ impl Kol {
         params: &FirstTouchesParams,
     ) -> Result<FirstTouchesResponse> {
         self.core.get("/kol/first-touches", params).await
+    }
+    /// Roster of tracked KOL wallets (`GET /kol/wallets`) — names, socials,
+    /// strategy tag, tracked-since. No performance numbers (see `leaderboard` /
+    /// `wallet`). Every tier.
+    pub async fn wallets(&self, params: &KolWalletsParams) -> Result<KolWalletsResponse> {
+        self.core.get("/kol/wallets", params).await
     }
 }
