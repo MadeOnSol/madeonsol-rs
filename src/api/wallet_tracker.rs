@@ -17,7 +17,8 @@ impl WalletTracker {
         self.core.get("/wallet-tracker/watchlist", &()).await
     }
 
-    /// Add a wallet to your watchlist. Returns HTTP 409 if already tracked or limit reached.
+    /// Add a wallet to your watchlist (the inserted row is under `wallet`).
+    /// Returns HTTP 409 if already tracked or limit reached.
     pub async fn add_to_watchlist(
         &self,
         params: &WatchlistAddParams,
@@ -27,7 +28,7 @@ impl WalletTracker {
             .await
     }
 
-    /// Remove a wallet from your watchlist.
+    /// Remove a wallet from your watchlist (echoes the address as `removed`).
     pub async fn remove_from_watchlist(
         &self,
         wallet: &str,
@@ -38,11 +39,12 @@ impl WalletTracker {
     }
 
     /// Update a wallet's label (or pass `label: None` to clear it).
+    /// The updated row is under `wallet`.
     pub async fn update_label(
         &self,
         wallet: &str,
         params: &WatchlistUpdateParams,
-    ) -> Result<WalletEntry> {
+    ) -> Result<WatchlistUpdateResponse> {
         self.core
             .patch_json(
                 &format!("/wallet-tracker/watchlist/{}", wallet),

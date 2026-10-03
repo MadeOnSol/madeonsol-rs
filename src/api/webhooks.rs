@@ -16,17 +16,23 @@ impl Webhooks {
         self.core.get("/webhooks", &()).await
     }
 
-    /// Create a new webhook.
-    pub async fn create(&self, params: &WebhookCreateParams) -> Result<Webhook> {
+    /// Create a new webhook. The response is the only one that carries the
+    /// HMAC `secret` (`response.webhook.secret`) — store it.
+    pub async fn create(&self, params: &WebhookCreateParams) -> Result<WebhookCreateResponse> {
         self.core.post_json("/webhooks", params).await
     }
 
-    /// Update a webhook.
+    /// One webhook plus its most recent deliveries.
+    pub async fn get(&self, id: i64) -> Result<WebhookGetResponse> {
+        self.core.get(&format!("/webhooks/{}", id), &()).await
+    }
+
+    /// Update a webhook (pause / resume with `is_active`).
     pub async fn update(
         &self,
         id: i64,
         params: &WebhookUpdateParams,
-    ) -> Result<Webhook> {
+    ) -> Result<WebhookUpdateResponse> {
         self.core
             .patch_json(&format!("/webhooks/{}", id), params)
             .await
