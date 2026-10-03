@@ -11,6 +11,7 @@ documentation = "https://docs.rs/madeonsol"
 readme = "README.md"
 keywords = ["solana", "memecoin", "kol", "pumpfun", "api"]
 categories = ["api-bindings", "web-programming::http-client"]
+exclude = ["sdk-contract/"]
 
 [dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
