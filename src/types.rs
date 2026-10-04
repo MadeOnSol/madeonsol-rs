@@ -8307,3 +8307,240 @@ pub struct ParamDeprecation {
     #[serde(default)]
     pub replacement: Option<String>,
 }
+
+// ─── Deployer activity timeline (/deployer-hunter/{wallet}/activity) ──────────
+
+/// Query params for [`Deployer::activity`](crate::api::deployer::Deployer::activity).
+/// `limit` is clamped server-side (PRO/ULTRA 100, BUSINESS 500); `since`
+/// (ISO 8601) is clamped to the plan window; `types` is a comma list
+/// (`launch,dev_buy,dev_sell,creator_transferred,fee_claim,funding_in,capital_out`).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct DeployerActivityParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub types: Option<String>,
+}
+
+/// One timeline event. Fields present depend on `event_type` (wire key
+/// `type`); addresses are raw facts of the concrete event, never identity
+/// claims. Unknown or new fields land in `extra`, so additive event types
+/// never break deserialization.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerActivityEvent {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    /// Time of the event itself (the window applies to this).
+    pub at: String,
+    /// `chain` | `ingest` | `chain_or_ingest`.
+    pub time_basis: String,
+    #[serde(default)]
+    pub mint: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub symbol: Option<String>,
+    #[serde(default)]
+    pub launchpad: Option<String>,
+    #[serde(default)]
+    pub bonded_at: Option<String>,
+    /// launch: whether the creator paid the create fee (`None` = unknown). The payer address is never in a PRO response.
+    #[serde(default)]
+    pub fee_payer_is_creator: Option<bool>,
+    #[serde(default)]
+    pub external_fee_payer: Option<bool>,
+    #[serde(default)]
+    pub dev_buy_sol: Option<f64>,
+    #[serde(default)]
+    pub dev_buy_tokens: Option<f64>,
+    #[serde(default)]
+    pub dev_buy_supply_pct: Option<f64>,
+    #[serde(default)]
+    pub own_token: Option<bool>,
+    #[serde(default)]
+    pub sol: Option<f64>,
+    #[serde(default)]
+    pub tokens: Option<f64>,
+    #[serde(default)]
+    pub price_usd: Option<f64>,
+    #[serde(default)]
+    pub first_at: Option<String>,
+    #[serde(default)]
+    pub last_at: Option<String>,
+    #[serde(default)]
+    pub aggregate: Option<bool>,
+    #[serde(default)]
+    pub from: Option<String>,
+    #[serde(default)]
+    pub to: Option<String>,
+    /// `in` | `out`.
+    #[serde(default)]
+    pub direction: Option<String>,
+    /// `creator` | `platform_admin` | `other_signer` | `unknown`.
+    #[serde(default)]
+    pub initiated_by: Option<String>,
+    #[serde(default)]
+    pub tx: Option<String>,
+    /// fee_claim: `direct` | `social`.
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub amount_raw: Option<String>,
+    #[serde(default)]
+    pub quote_mint: Option<String>,
+    /// funding_in: the funder address.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// capital_out: the recipient address.
+    #[serde(default)]
+    pub recipient: Option<String>,
+    #[serde(default)]
+    pub asset: Option<String>,
+    #[serde(default)]
+    pub decimals: Option<i64>,
+    #[serde(default)]
+    pub transfer_count: Option<i64>,
+    #[serde(default)]
+    pub sample_tx_ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub first_tx: Option<String>,
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
+/// Per-family coverage. `complete: false` means part of the window lies
+/// outside the online store (trade months only in the archive) or the
+/// boundary is unknown: never read an empty family as "nothing happened".
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerActivityFamilyCoverage {
+    pub source: String,
+    pub retention: String,
+    #[serde(default)]
+    pub scope: Option<String>,
+    pub truncated: bool,
+    pub loaded: bool,
+    pub complete: bool,
+    #[serde(default)]
+    pub complete_from: Option<String>,
+    #[serde(default)]
+    pub archive_required_before: Option<String>,
+    pub boundary_known: bool,
+    /// `no_attributed_launch` when the family was not queried because it cannot apply.
+    #[serde(default)]
+    pub skipped_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerActivityCoverage {
+    /// `observed` | `partial`.
+    pub status: String,
+    pub families: HashMap<String, DeployerActivityFamilyCoverage>,
+    pub future_events_dropped: i64,
+    pub note: String,
+}
+
+/// A `{from, to}` range plus the per-range flags (`source`, `clamped`,
+/// `max_days`, `served`, `reason`), present on the ranges that carry them.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerActivityRange {
+    #[serde(default)]
+    pub from: Option<String>,
+    #[serde(default)]
+    pub to: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub clamped: Option<bool>,
+    #[serde(default)]
+    pub max_days: Option<i64>,
+    #[serde(default)]
+    pub served: Option<bool>,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// Requested vs effective vs online vs archive-only history (archive reads are a planned follow-up).
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerActivityHistoryPlan {
+    pub requested: DeployerActivityRange,
+    pub effective: DeployerActivityRange,
+    pub online: DeployerActivityRange,
+    #[serde(default)]
+    pub archive_only: Option<DeployerActivityRange>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerActivityPlan {
+    /// `pro` | `ultra` | `business`.
+    pub entitlement: String,
+    #[serde(default)]
+    pub window_days: Option<i64>,
+    pub max_limit: i64,
+    pub history: DeployerActivityHistoryPlan,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerActivityWindow {
+    #[serde(default)]
+    pub since: Option<String>,
+    pub until: String,
+    #[serde(default)]
+    pub max_days: Option<i64>,
+    /// Always `event_time`.
+    pub applies_to: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerActivityPagination {
+    pub limit: i64,
+    pub requested_limit: i64,
+    pub limit_capped: bool,
+    #[serde(default)]
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerActivityDeployer {
+    #[serde(default)]
+    pub tier: Option<String>,
+    #[serde(default)]
+    pub first_deploy_at: Option<String>,
+    #[serde(default)]
+    pub last_deploy_at: Option<String>,
+}
+
+/// ULTRA/BUSINESS only (absent on PRO). Currently `status: not_available`
+/// (identity stitching is not released); later fields land in `extra`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerActivityIdentity {
+    pub status: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
+/// `GET /deployer-hunter/{wallet}/activity`, PRO+. Feature-flagged
+/// server-side (503 `feature_disabled` until enabled).
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerActivityResponse {
+    pub wallet: String,
+    pub is_deployer: bool,
+    #[serde(default)]
+    pub deployer: Option<DeployerActivityDeployer>,
+    pub plan: DeployerActivityPlan,
+    pub window: DeployerActivityWindow,
+    pub events: Vec<DeployerActivityEvent>,
+    pub pagination: DeployerActivityPagination,
+    pub coverage: DeployerActivityCoverage,
+    #[serde(default)]
+    pub identity: Option<DeployerActivityIdentity>,
+}
