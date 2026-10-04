@@ -155,4 +155,23 @@ impl Deployer {
             .get(&format!("/deployer-hunter/{}/rewards", wallet), &())
             .await
     }
+
+    /// v0.31: a wallet's deployer activity as one newest-first timeline:
+    /// launches, its own dev buys/sells, creator transfers, fee claims,
+    /// funding in and capital out. The window applies to each EVENT's own
+    /// time (PRO 30 d, ULTRA 365 d, BUSINESS unbounded; page clamped to
+    /// 100 / 100 / 500, echoed in `plan`). History is online-only for now:
+    /// check `coverage.families[..].complete` / `archive_required_before` and
+    /// `plan.history.archive_only` before reading an empty range as "nothing
+    /// happened". PRO responses carry no identity block and no fee-payer
+    /// address. Paginate with `pagination.next_cursor`.
+    pub async fn activity(
+        &self,
+        wallet: &str,
+        params: &DeployerActivityParams,
+    ) -> Result<DeployerActivityResponse> {
+        self.core
+            .get(&format!("/deployer-hunter/{}/activity", wallet), params)
+            .await
+    }
 }

@@ -327,3 +327,61 @@ fn wallet_batch_flags_funding_list_score() {
     }));
     assert_eq!(s.wallets[1].status, "not_computed");
 }
+
+#[test]
+fn deployer_activity_pro_and_ultra_shapes() {
+    let fam = json!({ "source": "token_trades", "retention": "r", "scope": "s", "truncated": false, "loaded": true,
+        "complete": true, "complete_from": "2026-09-04T12:00:00.000Z", "archive_required_before": null, "boundary_known": true });
+    let pro: DeployerActivityResponse = de(json!({
+        "wallet": "W", "is_deployer": true,
+        "deployer": { "tier": "cold", "first_deploy_at": "2026-01-01T00:00:00Z", "last_deploy_at": null },
+        "plan": { "entitlement": "pro", "window_days": 30, "max_limit": 100, "history": {
+            "requested": { "from": "2026-09-04T12:00:00.000Z", "to": "2026-10-04T12:00:00.000Z", "source": "plan_default" },
+            "effective": { "from": "2026-09-04T12:00:00.000Z", "to": "2026-10-04T12:00:00.000Z", "clamped": false, "max_days": 30 },
+            "online": { "from": "2026-09-04T12:00:00.000Z", "to": "2026-10-04T12:00:00.000Z", "served": true },
+            "archive_only": null } },
+        "window": { "since": "2026-09-04T12:00:00.000Z", "until": "2026-10-04T12:00:00.000Z", "max_days": 30, "applies_to": "event_time" },
+        "events": [
+            { "id": "launch:M", "type": "launch", "at": "2026-10-03T10:00:00Z", "time_basis": "ingest", "mint": "M", "name": null, "symbol": "ONE",
+              "launchpad": "pumpfun", "bonded_at": null, "fee_payer_is_creator": false, "external_fee_payer": true,
+              "dev_buy_sol": 1.5, "dev_buy_tokens": 1000, "dev_buy_supply_pct": null },
+            { "id": "dev_trade:s:M:sell", "type": "dev_sell", "at": "2026-10-03T11:00:00.000Z", "time_basis": "ingest", "mint": "M",
+              "own_token": true, "sol": 2.5, "tokens": 5000, "price_usd": null, "tx": "s" },
+            { "id": "creator_transferred:t:0", "type": "creator_transferred", "at": "2026-10-02T12:00:00Z", "time_basis": "chain", "mint": "M",
+              "from": "W", "to": "C", "direction": "out", "initiated_by": "creator", "tx": "t" },
+            { "id": "capital_out:E:native", "type": "capital_out", "at": "2026-10-01T13:00:00Z", "time_basis": "chain", "recipient": "E",
+              "asset": "native", "amount_raw": "1", "decimals": 9, "transfer_count": 1, "first_at": "2026-10-01T13:00:00Z",
+              "last_at": "2026-10-01T13:00:00Z", "first_tx": null, "aggregate": true },
+            { "id": "dev_token_transfer:x:1:M:out", "type": "dev_token_transfer_out", "at": "2026-10-04T10:00:00Z", "time_basis": "chain",
+              "mint": "M", "counterparty": "E", "token_amount_raw": "777" }
+        ],
+        "pagination": { "limit": 100, "requested_limit": 5000, "limit_capped": true, "next_cursor": null, "has_more": false },
+        "coverage": { "status": "observed", "families": { "dev_trades": fam.clone() }, "future_events_dropped": 0, "note": "n" }
+    }));
+    assert!(pro.identity.is_none());
+    assert_eq!(pro.events[0].external_fee_payer, Some(true));
+    assert_eq!(pro.events[2].from.as_deref(), Some("W"));
+    assert_eq!(pro.events[3].recipient.as_deref(), Some("E"));
+    assert_eq!(pro.events[4].extra["counterparty"], "E"); // additive event types never break
+    assert!(pro.plan.history.archive_only.is_none());
+
+    let mut skipped = fam.clone();
+    skipped["skipped_reason"] = json!("no_attributed_launch");
+    skipped["complete"] = json!(false);
+    let ultra: DeployerActivityResponse = de(json!({
+        "wallet": "N", "is_deployer": false, "deployer": null,
+        "plan": { "entitlement": "ultra", "window_days": 365, "max_limit": 100, "history": {
+            "requested": { "from": "2025-10-04T12:00:00.000Z", "to": "2026-10-04T12:00:00.000Z", "source": "plan_default" },
+            "effective": { "from": "2025-10-04T12:00:00.000Z", "to": "2026-10-04T12:00:00.000Z", "clamped": false, "max_days": 365 },
+            "online": { "from": "2026-07-01T00:00:00.000Z", "to": "2026-10-04T12:00:00.000Z", "served": true },
+            "archive_only": { "from": "2026-04-01T00:00:00.000Z", "to": "2026-07-01T00:00:00.000Z", "served": false, "reason": "archive_reads_not_enabled" } } },
+        "window": { "since": "2025-10-04T12:00:00.000Z", "until": "2026-10-04T12:00:00.000Z", "max_days": 365, "applies_to": "event_time" },
+        "events": [],
+        "pagination": { "limit": 50, "requested_limit": 50, "limit_capped": false, "next_cursor": null, "has_more": false },
+        "coverage": { "status": "partial", "families": { "dev_trades": skipped }, "future_events_dropped": 0, "note": "n" },
+        "identity": { "status": "not_available", "reason": "identity_stitching_not_released", "note": "n" }
+    }));
+    assert_eq!(ultra.identity.unwrap().status, "not_available");
+    assert_eq!(ultra.plan.history.archive_only.unwrap().served, Some(false));
+    assert_eq!(ultra.coverage.families["dev_trades"].skipped_reason.as_deref(), Some("no_attributed_launch"));
+}
