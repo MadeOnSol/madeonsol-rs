@@ -6,8 +6,12 @@ use crate::types::*;
 
 /// Copy-trade rules CRUD + fired signal history — PRO+.
 ///
-/// A rule fires on trades of tracked KOL wallets only: `source_wallets_untracked`
-/// and `warnings` on every rule response say which source wallets can never fire.
+/// Copy-trade rules can follow any valid Solana wallet, KOL or not (server
+/// 2026-10-04, `source_admission` `any_wallet`; KOL membership is enrichment only
+/// and copy-trade sources do not use Wallet Tracker quota). `operational_state` on
+/// every rule says whether it can fire right now (`eligible`, or an infrastructure
+/// state with `monitoring_reasons`); under the legacy `kol_only` engine only tracked
+/// KOL wallets fire.
 /// Delivery is webhook (HMAC-signed; the secret is returned once), WebSocket or both.
 #[derive(Debug, Clone)]
 pub struct Copytrade {
