@@ -385,3 +385,64 @@ fn deployer_activity_pro_and_ultra_shapes() {
     assert_eq!(ultra.plan.history.archive_only.unwrap().served, Some(false));
     assert_eq!(ultra.coverage.families["dev_trades"].skipped_reason.as_deref(), Some("no_attributed_launch"));
 }
+
+#[test]
+fn copytrade_any_wallet_operational_state() {
+    // Server 2026-10-04: any-wallet admission + operational state on every rule.
+    let ok: CopytradeSubscription = de(json!({
+        "id": 7, "name": null, "source_wallets": ["W1", "W2"], "min_trade_sol": 0, "only_action": "buy",
+        "sizing_mode": "fixed", "sizing_amount": 0.1, "delivery_mode": "websocket", "webhook_url": null,
+        "min_mc_usd": null, "max_mc_usd": null, "is_active": true, "created_at": "t", "updated_at": "t",
+        "source_wallets_tracked": ["W1"], "source_wallets_untracked": ["W2"],
+        "operational_state": "eligible", "source_admission": "any_wallet"
+    }));
+    assert_eq!(ok.source_admission.as_deref(), Some("any_wallet"));
+    assert_eq!(ok.operational_state.as_deref(), Some("eligible"));
+    assert!(ok.monitoring_reasons.is_none());
+    let down: CopytradeSubscription = de(json!({
+        "id": 8, "source_wallets": ["W3"], "operational_state": "monitoring_unavailable",
+        "source_admission": "any_wallet", "monitoring_reasons": ["trade_stream_stale"]
+    }));
+    assert_eq!(down.monitoring_reasons.unwrap(), vec!["trade_stream_stale".to_string()]);
+}
+
+#[test]
+fn token_lock_sablier_holder_and_smithii_untracked_withdrawals() {
+    let base = |program: &str| json!({
+        "lock_account": "L", "program": program, "kind": "vesting", "status": "active", "mint": "M",
+        "sender": "S", "recipient": null, "name": null, "amount_raw": "100", "amount": null, "amount_usd": null,
+        "amount_pct_of_supply": null, "locked_raw": "60", "locked": null, "locked_usd": null,
+        "locked_pct_of_supply": null, "unlocked_raw": "40", "unlocked": null,
+        "withdrawn": null, "claimable": null, "start_at": null, "cliff_at": null, "end_at": null,
+        "period_seconds": null, "continuous": false, "amount_per_period_raw": null, "amount_per_period": null,
+        "cliff_amount_raw": null, "cliff_amount": null, "perpetual": false, "next_unlock": null,
+        "cancelable_by_sender": null, "cancelable_by_recipient": null, "transferable": null, "can_topup": null,
+        "cancelled_at": null, "created_at": null, "created_at_estimated": false, "tx_signature": null
+    });
+    let mut sablier = base("sablier_lockup");
+    let o = sablier.as_object_mut().unwrap();
+    o.insert("holder_status".into(), json!("lost_proof"));
+    o.insert("last_proven_holder".into(), json!("H"));
+    o.insert("holder_proven_at_slot".into(), json!(312000000));
+    o.insert("withdrawn_raw".into(), json!("10"));
+    o.insert("withdrawn_tracked".into(), json!(true));
+    o.insert("claimable_raw".into(), json!("30"));
+    let s: TokenLock = de(sablier);
+    assert!(matches!(s.program, LockProgram::SablierLockup));
+    assert!(s.recipient.is_none());
+    assert_eq!(s.holder_status.as_deref(), Some("lost_proof"));
+    assert_eq!(s.last_proven_holder.as_deref(), Some("H"));
+    assert_eq!(s.holder_proven_at_slot, Some(312000000));
+
+    // Smithii: withdrawals are not exposed — null raw strings, never zero.
+    let mut smithii = base("smithii_vesting");
+    let o = smithii.as_object_mut().unwrap();
+    o.insert("withdrawn_raw".into(), json!(null));
+    o.insert("withdrawn_tracked".into(), json!(false));
+    o.insert("claimable_raw".into(), json!(null));
+    o.insert("holder_status".into(), json!(null));
+    let m: TokenLock = de(smithii);
+    assert!(matches!(m.program, LockProgram::SmithiiVesting));
+    assert_eq!(m.withdrawn_tracked, Some(false));
+    assert!(m.withdrawn_raw.is_none() && m.claimable_raw.is_none());
+}

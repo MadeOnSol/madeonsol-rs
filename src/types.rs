@@ -3596,6 +3596,10 @@ pub enum LockProgram {
     Streamflow,
     JupiterLock,
     BonfidaVesting,
+    /// Smithii vesting (withdrawals not exposed: `withdrawn_tracked` false).
+    SmithiiVesting,
+    /// Sablier Lockup stream; the recipient is the proven stream-NFT holder (see `holder_status`).
+    SablierLockup,
     #[serde(other)]
     Other,
 }
@@ -3606,6 +3610,8 @@ impl LockProgram {
             Self::Streamflow => "streamflow",
             Self::JupiterLock => "jupiter_lock",
             Self::BonfidaVesting => "bonfida_vesting",
+            Self::SmithiiVesting => "smithii_vesting",
+            Self::SablierLockup => "sablier_lockup",
             Self::Other => "other",
         }
     }
@@ -3778,8 +3784,23 @@ pub struct TokenLock {
     /// Creator / locker (Bonfida has none on-chain).
     #[serde(default)]
     pub sender: Option<String>,
+    /// Beneficiary. `sablier_lockup`: the CURRENT proven stream-NFT holder only
+    /// (`None` when not currently proven, see `holder_status`). `smithii_vesting`:
+    /// `None` for merkle receivers.
     #[serde(default)]
     pub recipient: Option<String>,
+    /// Server 2026-10-03 — `sablier_lockup` only (`None` for other programs):
+    /// `current` | `lost_proof` | `never_proven` | `burned` | `anomaly` (fail closed).
+    #[serde(default)]
+    pub holder_status: Option<String>,
+    /// Server 2026-10-03 — `sablier_lockup` only: the last holder a verifying read
+    /// proved (provenance, NOT the recipient unless `holder_status` is `current`).
+    #[serde(default)]
+    pub last_proven_holder: Option<String>,
+    /// Server 2026-10-03 — `sablier_lockup` only: slot of the read that last proved
+    /// `last_proven_holder`.
+    #[serde(default)]
+    pub holder_proven_at_slot: Option<i64>,
     #[serde(default)]
     pub name: Option<String>,
     /// Deposited amount, base units.
@@ -3806,12 +3827,19 @@ pub struct TokenLock {
     pub unlocked_raw: String,
     #[serde(default)]
     pub unlocked: Option<f64>,
-    /// Claimed so far.
-    pub withdrawn_raw: String,
+    /// Claimed so far; `None` when the program does not expose it
+    /// (`withdrawn_tracked` false: `smithii_vesting`).
+    #[serde(default)]
+    pub withdrawn_raw: Option<String>,
     #[serde(default)]
     pub withdrawn: Option<f64>,
-    /// Unlocked but not yet withdrawn.
-    pub claimable_raw: String,
+    /// Server 2026-10-03 — `Some(false)` = withdrawn / claimable are unknown
+    /// (`None`), not zero. `None` on older servers (= tracked).
+    #[serde(default)]
+    pub withdrawn_tracked: Option<bool>,
+    /// Unlocked but not yet withdrawn; `None` when withdrawn is not tracked.
+    #[serde(default)]
+    pub claimable_raw: Option<String>,
     #[serde(default)]
     pub claimable: Option<f64>,
     #[serde(default)]
@@ -7633,13 +7661,36 @@ pub struct CopytradeSubscription {
     pub created_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
-    /// Source wallets that are tracked KOL wallets (only these can fire). null = lookup failed.
+    /// Deprecated 2026-10-04 (kept, still filled): source wallets that are tracked
+    /// KOL wallets. KOL enrichment only under `source_admission` `any_wallet`; under
+    /// the legacy `kol_only` engine only these fire. `None` = lookup failed.
     #[serde(default)]
     pub source_wallets_tracked: Option<Vec<String>>,
+    /// Deprecated 2026-10-04 (kept, still filled): source wallets that are not
+    /// tracked KOL wallets. They fire like any other wallet under `any_wallet`.
     #[serde(default)]
     pub source_wallets_untracked: Option<Vec<String>>,
+    /// Present only when something needs attention (legacy `kol_only`).
     #[serde(default)]
     pub warnings: Option<Vec<CopytradeRuleWarning>>,
+    /// Server 2026-10-04 — whether the rule can fire right now, separate from
+    /// `is_active`: `eligible`, or an infrastructure state `monitoring_pending`
+    /// (rule changed after the engine's last load, live within seconds),
+    /// `monitoring_unavailable` (engine / trade stream not reporting, see
+    /// `monitoring_reasons`), `source_capacity_unavailable`. Legacy `kol_only`:
+    /// `no_tracked_sources` | `unknown`.
+    #[serde(default)]
+    pub operational_state: Option<String>,
+    /// Server 2026-10-04 — which trades the RUNNING engine admits: `any_wallet`
+    /// (any valid wallet, KOL or not) or legacy `kol_only`. `None` = unknown
+    /// (legacy semantics).
+    #[serde(default)]
+    pub source_admission: Option<String>,
+    /// Server 2026-10-04 — present only with `operational_state`
+    /// `monitoring_unavailable`: e.g. `trade_stream_stale`, `source_producer_stale`,
+    /// `map_stale`, `engine_state_stale`.
+    #[serde(default)]
+    pub monitoring_reasons: Option<Vec<String>>,
 }
 
 /// Body for `POST /copytrade/subscriptions`.
