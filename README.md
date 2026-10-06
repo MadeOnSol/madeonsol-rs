@@ -1,7 +1,5 @@
 # madeonsol
 
-> Unreleased contract update: adds early-stream and coverage bindings. Concentrated-depth quote/price-target numbers are now `Option<f64>` because the API can return null; callers must handle unavailable quotes. No package version has been published by this change.
-
 [![Crates.io](https://img.shields.io/crates/v/madeonsol?style=flat-square)](https://crates.io/crates/madeonsol)
 [![docs.rs](https://img.shields.io/docsrs/madeonsol?style=flat-square)](https://docs.rs/madeonsol)
 [![Crates.io downloads](https://img.shields.io/crates/d/madeonsol?style=flat-square)](https://crates.io/crates/madeonsol)
@@ -22,6 +20,8 @@ async, `tokio`-based, `rustls`-only.
 > **Free tier: 200 requests/day across 40+ endpoints (live feeds 5-min delayed; paid tiers are real-time) — no signup payment. Get a key at <https://madeonsol.com/pricing>.**
 >
 > **This is the keyed REST SDK** — authenticate with an API key (`msk_…`). It covers the full endpoint surface (KOL intelligence, deployer intel, token risk/buyer-quality/bundle, Signal Scorecard, wallet PnL, DEX firehose). Want **x402 pay-per-call** instead — no signup, your agent's wallet pays per request in USDC? Use the TypeScript [`madeonsol-x402`](https://www.npmjs.com/package/madeonsol-x402) or Python [`madeonsol-x402`](https://pypi.org/project/madeonsol-x402/) clients.
+
+> **New in 0.33.0 (early deploy observations + coverage evidence). Breaking type change:** the concentrated-liquidity depth numbers `DepthQuote.tokens_out` / `avg_price_sol` / `price_impact_pct` and `DepthToMovePrice.pct_1` / `pct_5` / `pct_10` are now `Option<f64>`. The API sends `null` when a quote or price target cannot be computed, which the old `f64` fields refused to deserialize; handle `None` (it is never defaulted to 0). New public fields can also break struct literals. **Sniper:** the feed is ULTRA, BUSINESS and ENTERPRISE only and reports observed deploy instructions, not executions. `SniperDeploy` gains `event_id` (deduplicate on it), `source`, `outer_instruction_index`, `observation_stage`, `execution_status`, `transaction_version` (`EarlyTransactionVersion`), `transaction_config` (`EarlyTransactionConfig`: requested compute and fee settings, `priority_fee_lamports` as a decimal string) and `fee_payer`; `StreamToken` gains `early_ws_url` and `early_stream` (`EarlyStreamGuide`), present only when the early stream is active and the key is ULTRA or above. No timing lead is promised. **Contract parity:** copy-trade identity v2 on `CopytradeSignal` (`economic_action_id`, `identity_version`, `source_actor`, `co_actors`), LP security on `TokenSummary` (`lp_secured_pct`, `lp_secured_basis`, `lp_locked_until`), `AlmostBondedToken.venue_source`, cap-table `ranks_completeness`, depth `status`, `pool_selection` and per-pool `model_detail` / `pool_account` / `fee_basis` / `bins_window` / `ticks_window`, batch-classify `label_coverage` / `rule_version` / `evidence_horizon`, proven-holding fields on wallet PnL and positions (`holding_check`, `position_basis`, `holding_status`, `holding_unverified_reason`, `cost_basis_status`, `holding`) and funding `wallet_coverage`. All new fields are `Option` and absent on older responses.
 
 > **New in 0.32.0 (any-wallet copy-trade).** Copy-trade rules can now follow any wallet, KOL or not (server 2026-10-04; KOL membership is enrichment only and copy-trade sources do not use Wallet Tracker quota). `CopytradeSubscription` gains `source_admission` (`"any_wallet"` | legacy `"kol_only"`; `None` = unknown, legacy semantics), `operational_state` (`eligible`, or an infrastructure state `monitoring_pending` / `monitoring_unavailable` / `source_capacity_unavailable`; legacy `no_tracked_sources` / `unknown`) and `monitoring_reasons`; `source_wallets_tracked` / `source_wallets_untracked` are deprecated (kept and still filled). **Token locks:** `LockProgram` adds `SmithiiVesting` and `SablierLockup`; `TokenLock` gains the Sablier stream-NFT holder proof (`holder_status`, `last_proven_holder`, `holder_proven_at_slot`; `recipient` is only the CURRENT proven holder) and `withdrawn_tracked`. **Fix (breaking type change):** `TokenLock.withdrawn_raw` / `claimable_raw` are now `Option<String>` — the API sends `null` when the program does not expose withdrawals (Smithii), which the old `String` fields refused to deserialize.
 
@@ -98,7 +98,7 @@ Annual: PRO €430/yr, ULTRA €1,310/yr, BUSINESS €4,000/yr (2 months free). 
 
 ```toml
 [dependencies]
-madeonsol = "0.27"
+madeonsol = "0.33"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
