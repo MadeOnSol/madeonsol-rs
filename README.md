@@ -1,5 +1,7 @@
 # madeonsol
 
+> Unreleased contract update: adds early-stream and coverage bindings. Concentrated-depth quote/price-target numbers are now `Option<f64>` because the API can return null; callers must handle unavailable quotes. No package version has been published by this change.
+
 [![Crates.io](https://img.shields.io/crates/v/madeonsol?style=flat-square)](https://crates.io/crates/madeonsol)
 [![docs.rs](https://img.shields.io/docsrs/madeonsol?style=flat-square)](https://docs.rs/madeonsol)
 [![Crates.io downloads](https://img.shields.io/crates/d/madeonsol?style=flat-square)](https://crates.io/crates/madeonsol)
@@ -153,7 +155,7 @@ The `MadeOnSol` client exposes namespaced sub-clients:
 | `client.first_touch_subscriptions` | Push alerts on first-KOL-touch events (ULTRA) |
 | `client.price_alerts` *(new 0.10)* | MC-drop / recovery price alert rules CRUD + event history (PRO/ULTRA) |
 | `client.signals` *(new 0.16)* | **Signal Scorecard** — out-of-sample, machine-readable signal reliability (`performance`) + discovery catalog |
-| `client.sniper` *(new 0.11)* | **Deshred** pre-confirm pump.fun deploy feed (~500ms head start) + custom deployer watchlist (PRO/ULTRA) |
+| `client.sniper` *(new 0.11)* | **Early** pre-confirm pump.fun deploy feed (execution initially unknown) + custom deployer watchlist (ULTRA/BUSINESS/ENTERPRISE) |
 | `client.tools` | Solana tool directory search |
 | `client.stream` | Issue WebSocket streaming tokens (**non-expiring since 2026-08-27**), **rotate** them *(new 0.26.1)*, **list / kill live sessions** |
 | `client.webhooks` | Webhook CRUD (PRO/ULTRA) |
@@ -291,15 +293,15 @@ loop {
 
 **Cost-basis honesty.** Observable only inside the 90-day window. Overflow sells (no matching buy in window) are silently discarded rather than fabricated. `notes.cost_basis_observable_from` makes the cutoff visible.
 
-## Deshred sniper alerts *(new in 0.11)*
+## Early sniper alerts *(new in 0.11)*
 
-The fastest path to a new pump.fun launch. Deploys are reconstructed from shred-level (**deshred**) data and surface **~500ms before the chain confirms them**. **PRO** sees elite + good deployers; **ULTRA** sees every tier and can keep a custom deployer watchlist. For live push use the `sniper:deploy` webhook, the `sniper:deploys` WebSocket channel, or `/alert sniper` in Telegram — these methods are for catch-up, backtesting, and watchlist management.
+Early deploy observations require **ULTRA/BUSINESS/ENTERPRISE**. With ShredPrism activated, stream-token discovery includes `early_ws_url` and `early_stream` for `early:deploys`. Execution starts unknown; use separate execution evidence and deduplicate by `event_id`. No timing lead or settlement rate is guaranteed. REST, legacy sniper WebSocket/webhook delivery and watchlists use the same tier gate.
 
 ```rust
 # async fn run(client: madeonsol::MadeOnSol) -> Result<(), Box<dyn std::error::Error>> {
 use madeonsol::types::{SniperRecentParams, SniperWatchlistAddParams};
 
-// Deshred deploy feed — PRO: elite/good · ULTRA: all tiers
+// Early deploy feed — ULTRA/BUSINESS/ENTERPRISE
 let feed = client.sniper.recent(&SniperRecentParams { limit: Some(50), ..Default::default() }).await?;
 for d in &feed.deploys {
     println!("{} by {} (tier {:?})", d.symbol.as_deref().unwrap_or("?"), d.deployer_wallet, d.deployer_tier);
@@ -846,7 +848,7 @@ assert_eq!(fresh.rotated, Some(true));
 # }
 ```
 
-Channels: `kol:trades`, `kol:coordination`, `kol:first_touches`, `deployer:alerts`, `wallet_tracker:events`, `copytrade:signals`, `price_alert:events`, `sniper:deploys`, `token:graduations` (`GraduationEvent`), `token:prices` (mint-scoped price / MC ticks), `token:locks` *(new 0.26 — event `token:lock`, `TokenLockEvent`: every NEW lock / vesting contract; LP locks not included)*, `token:fee_claims` *(new 0.26 — event `token:fee_claim`, `TokenFeeClaimEvent`: every pump.fun fee event; history starts 2026-08-17)*, `token:surges` *(new 0.27 — events `token:surge` / `token:revival`, `TokenSurgeStreamEvent`: momentum fires with tape / KOL / early-buyer / deployer context and `risk_flags`; server-side filters `kinds`, `tiers`, `launchpads`, `exclude_flags`, `min_mc_usd` / `max_mc_usd`, `deployer_tier` — `SurgeSubscribeFilters`; the +1 h `outcome` is REST-only)*. All PRO+.
+Channels: `kol:trades`, `kol:coordination`, `kol:first_touches`, `deployer:alerts`, `wallet_tracker:events`, `copytrade:signals`, `price_alert:events`, `sniper:deploys`, `token:graduations` (`GraduationEvent`), `token:prices` (mint-scoped price / MC ticks), `token:locks` *(new 0.26 — event `token:lock`, `TokenLockEvent`: every NEW lock / vesting contract; LP locks not included)*, `token:fee_claims` *(new 0.26 — event `token:fee_claim`, `TokenFeeClaimEvent`: every pump.fun fee event; history starts 2026-08-17)*, `token:surges` *(new 0.27 — events `token:surge` / `token:revival`, `TokenSurgeStreamEvent`: momentum fires with tape / KOL / early-buyer / deployer context and `risk_flags`; server-side filters `kinds`, `tiers`, `launchpads`, `exclude_flags`, `min_mc_usd` / `max_mc_usd`, `deployer_tier` — `SurgeSubscribeFilters`; the +1 h `outcome` is REST-only)*. Channel tiers vary; sniper:deploys requires ULTRA/BUSINESS/ENTERPRISE.
 
 The DEX firehose URL (`token.dex_ws_url`) is only present for ULTRA subscribers.
 See <https://madeonsol.com/api-docs> for the full subscribe/unsubscribe protocol.

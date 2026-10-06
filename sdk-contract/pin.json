@@ -2,8 +2,8 @@
   "schema": 1,
   "sdk": "madeonsol-rs",
   "source_repo": "MadeOnSol/madeonsol",
-  "source_sha": "f62bbb9408be9b71720a3156f8aabf20fe7dfd7c",
+  "source_sha": "5694aa7712b7091f80954f4ff002fa3f4868cb2e",
   "source_dirty": false,
-  "contract_hash": "550b5397ba4cdc7eca4cd20b77ae20922f074d275cdfe45afe7db2cbf0288bce",
+  "contract_hash": "90601e3b33ea26daa18cc978a9ea8cd89217200abd875a664e0d5948aa909753",
   "operation_count": 198
 }

@@ -4,12 +4,10 @@ use crate::client::HttpCore;
 use crate::error::Result;
 use crate::types::*;
 
-/// Deshred pre-confirm pump.fun sniper feed. PRO + ULTRA.
+/// Early deploy observations. ULTRA/BUSINESS/ENTERPRISE only.
 ///
-/// Deploys are reconstructed from shred-level ("deshred") data and surface
-/// ~500ms before the chain confirms them — the fastest path to a new pump.fun
-/// launch. PRO is curated to elite/good deployers; ULTRA sees every tier and can
-/// maintain a custom deployer watchlist.
+/// Observed instructions are not proof of successful execution. Read the
+/// execution status and deduplicate by event_id; no timing lead is guaranteed.
 ///
 /// These methods are for catch-up / backtesting and watchlist management. For
 /// **live** push, use the `sniper:deploy` webhook event, the `sniper:deploys`
@@ -20,13 +18,13 @@ pub struct Sniper {
 }
 
 impl Sniper {
-    /// Newest-first deshred deploy feed. PRO sees elite/good deployers; ULTRA sees all.
+    /// Newest-first early deploy feed. ULTRA/BUSINESS/ENTERPRISE only.
     /// Set `watchlist: Some(true)` (ULTRA) to narrow to your custom deployer watchlist.
     pub async fn recent(&self, params: &SniperRecentParams) -> Result<SniperRecentResponse> {
         self.core.get("/sniper/recent", params).await
     }
 
-    /// Deshred deploys filtered to a single deployer wallet. ULTRA only.
+    /// Early deploys filtered to a single deployer wallet. ULTRA+ only.
     pub async fn by_deployer(
         &self,
         wallet: &str,

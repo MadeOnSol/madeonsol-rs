@@ -113,7 +113,7 @@ pub struct MadeOnSol {
     pub price_alerts: PriceAlerts,
     /// Signal Scorecard (v0.16) — out-of-sample, machine-readable signal reliability + catalog.
     pub signals: Signals,
-    /// Deshred pre-confirm pump.fun sniper feed + custom watchlist — PRO/ULTRA.
+    /// Early deploy observations + custom watchlist — ULTRA/BUSINESS/ENTERPRISE.
     pub sniper: Sniper,
     /// Solana tool directory search.
     pub tools: Tools,
