@@ -8430,6 +8430,19 @@ pub struct DeployerActivityEvent {
     pub at: String,
     /// `chain` | `ingest` | `chain_or_ingest`.
     pub time_basis: String,
+    /// Dev transfer / dev trade rows restored after a delivery gap (history only). getBlock recovery has
+    /// `time_basis` `chain`; spool replay keeps the original receive time (`ingest`).
+    #[serde(default)]
+    pub recovered: Option<bool>,
+    /// When the recovery wrote the row (only with `recovered: true`).
+    #[serde(default)]
+    pub recovered_at: Option<String>,
+    /// Received live but classified after a parked creator lookup; `at` stays the receive time.
+    #[serde(default)]
+    pub late_classified: Option<bool>,
+    /// Counterparties of a transfer aggregate per (tx, token, direction, actor); `None` on older rows.
+    #[serde(default)]
+    pub counterparty_count: Option<u32>,
     #[serde(default)]
     pub mint: Option<String>,
     #[serde(default)]
