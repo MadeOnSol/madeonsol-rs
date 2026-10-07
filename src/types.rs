@@ -2731,6 +2731,7 @@ pub struct AlphaCapTableSummary {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AlphaCapTableResponse {
+    pub ranks_completeness: Option<RanksCompleteness>,
     pub mint: String,
     pub buyers: Vec<AlphaCapTableBuyer>,
     pub summary: AlphaCapTableSummary,
@@ -5567,14 +5568,16 @@ impl DepthParams {
 /// Slippage quote for one requested buy size against one pool.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DepthQuote {
+    /// Unquotable concentrated windows carry null numeric values.
+    pub status: Option<String>,
     /// The requested buy size, in SOL.
     pub size_sol: f64,
     /// Tokens received for that buy (UI units).
-    pub tokens_out: f64,
+    pub tokens_out: Option<f64>,
     /// Average execution price paid, SOL per token.
-    pub avg_price_sol: f64,
+    pub avg_price_sol: Option<f64>,
     /// Price impact vs spot, percent (rounded to 2 decimals server-side).
-    pub price_impact_pct: f64,
+    pub price_impact_pct: Option<f64>,
 }
 
 /// SOL required to move a pool's spot price up by 1% / 5% / 10%
@@ -5582,17 +5585,22 @@ pub struct DepthQuote {
 #[derive(Debug, Clone, Deserialize)]
 pub struct DepthToMovePrice {
     #[serde(rename = "1pct")]
-    pub pct_1: f64,
+    pub pct_1: Option<f64>,
     #[serde(rename = "5pct")]
-    pub pct_5: f64,
+    pub pct_5: Option<f64>,
     #[serde(rename = "10pct")]
-    pub pct_10: f64,
+    pub pct_10: Option<f64>,
 }
 
 /// Per-pool depth breakdown: spot price, slippage quotes per buy size, and
 /// how much SOL it takes to move the price 1/5/10%.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DepthPool {
+    pub model_detail: Option<String>,
+    pub pool_account: Option<String>,
+    pub fee_basis: Option<String>,
+    pub bins_window: Option<DepthBinsWindow>,
+    pub ticks_window: Option<DepthTicksWindow>,
     pub pool_address: String,
     pub dex: String,
     pub quote_mint: String,
@@ -5649,6 +5657,7 @@ pub struct DepthUnsupportedPool {
 /// absent (`None`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct TokenDepthResponse {
+    pub pool_selection: Option<DepthPoolSelection>,
     pub mint: String,
     /// `true` when at least one pool has computable depth.
     pub found: bool,
@@ -5961,6 +5970,15 @@ pub struct SniperFootprint {
 /// `confirmed_on_chain` is `None` until reconciled.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SniperDeploy {
+    /// Stable action identity; deduplicate by this, not mint or signature alone.
+    pub event_id: Option<String>,
+    pub source: Option<String>,
+    pub outer_instruction_index: Option<u32>,
+    pub observation_stage: Option<String>,
+    pub execution_status: Option<String>,
+    pub transaction_version: Option<EarlyTransactionVersion>,
+    pub transaction_config: Option<EarlyTransactionConfig>,
+    pub fee_payer: Option<String>,
     pub mint: String,
     pub name: Option<String>,
     pub symbol: Option<String>,
@@ -6363,6 +6381,11 @@ pub struct WalletClosedPosition {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct WalletOpenPosition {
+    pub position_basis: Option<String>,
+    pub holding_status: Option<String>,
+    pub holding_unverified_reason: Option<String>,
+    pub cost_basis_status: Option<String>,
+    pub holding: Option<WalletPositionHolding>,
     pub token_mint: String,
     pub token_amount: f64,
     pub cost_basis_sol: f64,
@@ -6387,6 +6410,7 @@ pub struct WalletPnlNotes {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct WalletPnlResponse {
+    pub holding_check: Option<WalletHoldingCheck>,
     pub address: String,
     pub window_days: u32,
     pub summary: WalletPnlSummary,
@@ -6421,6 +6445,7 @@ pub struct WalletPnlResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct WalletPositionsResponse {
+    pub holding_check: Option<WalletHoldingCheck>,
     pub address: String,
     pub positions: Vec<WalletOpenPosition>,
     #[serde(default)]
@@ -6534,6 +6559,7 @@ pub struct WalletBatchRequest {
 /// window (recomputed daily, up to ~48h stale).
 #[derive(Debug, Clone, Deserialize)]
 pub struct WalletClassification {
+    pub label_coverage: Option<HashMap<String, LabelCoverageEntry>>,
     pub address: String,
     pub is_sniper: bool,
     pub is_bundler: bool,
@@ -6554,6 +6580,8 @@ pub struct WalletClassification {
 /// Response of [`Wallet::batch_classify`](crate::api::wallet::Wallet::batch_classify).
 #[derive(Debug, Clone, Deserialize)]
 pub struct WalletBatchClassifyResponse {
+    pub rule_version: Option<String>,
+    pub evidence_horizon: Option<HashMap<String, String>>,
     /// One entry per unique input wallet, in de-duplicated input order.
     pub wallets: Vec<WalletClassification>,
     /// Number of unique wallets classified.
@@ -6676,6 +6704,9 @@ pub struct ToolsSearchResponse {
 /// code `4001` means "mint a new token", never "the timer ran out".
 #[derive(Debug, Clone, Deserialize)]
 pub struct StreamToken {
+    /// Present only for activated ShredPrism and ULTRA/BUSINESS/ENTERPRISE.
+    pub early_ws_url: Option<String>,
+    pub early_stream: Option<EarlyStreamGuide>,
     pub token: String,
     /// Always `None` since 2026-08-27 — stream tokens do not expire; kept for
     /// wire compatibility. Do not schedule refreshes on it.
@@ -7023,6 +7054,9 @@ pub struct TokensListParams {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TokenSummary {
+    pub lp_secured_pct: Option<f64>,
+    pub lp_secured_basis: Option<String>,
+    pub lp_locked_until: Option<String>,
     pub mint: String,
     pub symbol: Option<String>,
     pub name: Option<String>,
@@ -7307,6 +7341,7 @@ pub struct AlmostBondedParams {
 /// the underlying data was unavailable.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AlmostBondedToken {
+    pub venue_source: Option<String>,
     pub mint: String,
     #[serde(default)]
     pub symbol: Option<String>,
@@ -7789,6 +7824,10 @@ pub struct CopytradeSignalsParams {
 /// One fired copy-trade signal.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CopytradeSignal {
+    pub economic_action_id: Option<String>,
+    pub identity_version: Option<u32>,
+    pub source_actor: Option<String>,
+    pub co_actors: Option<Vec<String>>,
     pub id: i64,
     pub subscription_id: i64,
     pub fired_at: String,
@@ -8271,6 +8310,7 @@ pub struct FundingPagination {
 /// funding connection, not proof of common ownership.
 #[derive(Debug, Clone, Deserialize)]
 pub struct WalletFundingResponse {
+    pub wallet_coverage: Option<WalletFundingCoverage>,
     pub chain: String,
     pub chain_id: String,
     pub native_asset: String,
@@ -8390,6 +8430,19 @@ pub struct DeployerActivityEvent {
     pub at: String,
     /// `chain` | `ingest` | `chain_or_ingest`.
     pub time_basis: String,
+    /// Dev transfer / dev trade rows restored after a delivery gap (history only). getBlock recovery has
+    /// `time_basis` `chain`; spool replay keeps the original receive time (`ingest`).
+    #[serde(default)]
+    pub recovered: Option<bool>,
+    /// When the recovery wrote the row (only with `recovered: true`).
+    #[serde(default)]
+    pub recovered_at: Option<String>,
+    /// Received live but classified after a parked creator lookup; `at` stays the receive time.
+    #[serde(default)]
+    pub late_classified: Option<bool>,
+    /// Counterparties of a transfer aggregate per (tx, token, direction, actor); `None` on older rows.
+    #[serde(default)]
+    pub counterparty_count: Option<u32>,
     #[serde(default)]
     pub mint: Option<String>,
     #[serde(default)]
@@ -8594,4 +8647,118 @@ pub struct DeployerActivityResponse {
     pub coverage: DeployerActivityCoverage,
     #[serde(default)]
     pub identity: Option<DeployerActivityIdentity>,
+}
+
+// Additive response metadata from the pinned API contract. Optional fields on
+// their parent response preserve compatibility with older server responses.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum EarlyTransactionVersion {
+    Named(String),
+    Number(u8),
+}
+
+/// Encoded requests, not executed resources; fees remain lossless decimal strings.
+#[derive(Debug, Clone, Deserialize)]
+pub struct EarlyTransactionConfig {
+    pub config_mask: u32,
+    pub priority_fee_lamports: Option<String>,
+    pub compute_unit_limit: Option<u32>,
+    pub loaded_accounts_data_size_limit: Option<u32>,
+    pub heap_size: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EarlyStreamGuide {
+    pub channels: Vec<String>,
+    pub subscribe_example: EarlySubscribeExample,
+    pub execution_status: String,
+    pub note: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EarlySubscribeExample {
+    #[serde(rename = "type")]
+    pub frame_type: String,
+    pub channels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RanksCompleteness {
+    pub ranks_complete: String,
+    pub rank_basis: String,
+    pub window: Option<RankWindow>,
+    pub gaps_overlapping: u64,
+    pub open_slots: u64,
+    pub gaps_in_open_slots: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RankWindow {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DepthBinsWindow {
+    pub from_bin: i64,
+    pub to_bin: i64,
+    pub slot: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DepthTicksWindow {
+    pub from_tick: i64,
+    pub to_tick: i64,
+    pub slot: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DepthPoolSelection {
+    pub largest_known_pool: String,
+    pub largest_known_pool_supported: bool,
+    pub primary_pool: Option<String>,
+    pub routing: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LabelCoverageEntry {
+    pub evaluated: bool,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletFundingCoverage {
+    pub state: String,
+    pub currently_tracked: bool,
+    pub ever_tracked: bool,
+    pub address_kind: Option<String>,
+    pub limitations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletHoldingCheck {
+    pub mode: String,
+    pub source: Option<String>,
+    pub verified_at: Option<String>,
+    pub verified: u64,
+    pub unverified: u64,
+    pub held: u64,
+    pub partially_reduced: u64,
+    pub transferred_or_disposed: u64,
+    pub external_inflow: u64,
+    pub note: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletPositionHolding {
+    pub status: String,
+    pub onchain_balance: f64,
+    pub held_known_amount: f64,
+    pub external_inflow_amount: f64,
+    pub cost_basis_held_sol: f64,
+    pub unrealized_known_sol: Option<f64>,
+    pub cost_basis_not_held_sol: f64,
+    pub verified_at: String,
+    pub source: String,
 }

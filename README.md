@@ -21,6 +21,8 @@ async, `tokio`-based, `rustls`-only.
 >
 > **This is the keyed REST SDK** — authenticate with an API key (`msk_…`). It covers the full endpoint surface (KOL intelligence, deployer intel, token risk/buyer-quality/bundle, Signal Scorecard, wallet PnL, DEX firehose). Want **x402 pay-per-call** instead — no signup, your agent's wallet pays per request in USDC? Use the TypeScript [`madeonsol-x402`](https://www.npmjs.com/package/madeonsol-x402) or Python [`madeonsol-x402`](https://pypi.org/project/madeonsol-x402/) clients.
 
+> **New in 0.33.0 (early deploy observations + coverage evidence). Breaking type change:** the concentrated-liquidity depth numbers `DepthQuote.tokens_out` / `avg_price_sol` / `price_impact_pct` and `DepthToMovePrice.pct_1` / `pct_5` / `pct_10` are now `Option<f64>`. The API sends `null` when a quote or price target cannot be computed, which the old `f64` fields refused to deserialize; handle `None` (it is never defaulted to 0). New public fields can also break struct literals. **Sniper:** the feed is ULTRA, BUSINESS and ENTERPRISE only and reports observed deploy instructions, not executions. `SniperDeploy` gains `event_id` (deduplicate on it), `source`, `outer_instruction_index`, `observation_stage`, `execution_status`, `transaction_version` (`EarlyTransactionVersion`), `transaction_config` (`EarlyTransactionConfig`: requested compute and fee settings, `priority_fee_lamports` as a decimal string) and `fee_payer`; `StreamToken` gains `early_ws_url` and `early_stream` (`EarlyStreamGuide`), present only when the early stream is active and the key is ULTRA or above. No timing lead is promised. **Contract parity:** copy-trade identity v2 on `CopytradeSignal` (`economic_action_id`, `identity_version`, `source_actor`, `co_actors`), LP security on `TokenSummary` (`lp_secured_pct`, `lp_secured_basis`, `lp_locked_until`), `AlmostBondedToken.venue_source`, cap-table `ranks_completeness`, depth `status`, `pool_selection` and per-pool `model_detail` / `pool_account` / `fee_basis` / `bins_window` / `ticks_window`, batch-classify `label_coverage` / `rule_version` / `evidence_horizon`, proven-holding fields on wallet PnL and positions (`holding_check`, `position_basis`, `holding_status`, `holding_unverified_reason`, `cost_basis_status`, `holding`) and funding `wallet_coverage`. All new fields are `Option` and absent on older responses.
+
 > **New in 0.32.0 (any-wallet copy-trade).** Copy-trade rules can now follow any wallet, KOL or not (server 2026-10-04; KOL membership is enrichment only and copy-trade sources do not use Wallet Tracker quota). `CopytradeSubscription` gains `source_admission` (`"any_wallet"` | legacy `"kol_only"`; `None` = unknown, legacy semantics), `operational_state` (`eligible`, or an infrastructure state `monitoring_pending` / `monitoring_unavailable` / `source_capacity_unavailable`; legacy `no_tracked_sources` / `unknown`) and `monitoring_reasons`; `source_wallets_tracked` / `source_wallets_untracked` are deprecated (kept and still filled). **Token locks:** `LockProgram` adds `SmithiiVesting` and `SablierLockup`; `TokenLock` gains the Sablier stream-NFT holder proof (`holder_status`, `last_proven_holder`, `holder_proven_at_slot`; `recipient` is only the CURRENT proven holder) and `withdrawn_tracked`. **Fix (breaking type change):** `TokenLock.withdrawn_raw` / `claimable_raw` are now `Option<String>` — the API sends `null` when the program does not expose withdrawals (Smithii), which the old `String` fields refused to deserialize.
 
 > **New in 0.31.0 (deployer activity timeline).** `client.deployer.activity(wallet, &DeployerActivityParams { limit, cursor, since, types })` binds `GET /deployer-hunter/{wallet}/activity` (typed `DeployerActivityResponse`): one newest-first timeline of launches, the deployer's own dev buys/sells, creator transfers, fee claims, funding in and capital out, windowed on each event's own time (PRO 30 d, ULTRA 365 d, BUSINESS unbounded; page clamped to 100 / 100 / 500 and echoed in `plan`). History is online-only for now: check `coverage.families[..].complete` / `archive_required_before` and `plan.history.archive_only` before reading an empty range as "nothing happened"; `skipped_reason: "no_attributed_launch"` marks a wallet with no attributed launch. Event fields are `Option` + `#[serde(default)]`, and unknown fields land in `extra`, so additive event types never break deserialization. PRO responses carry no identity block and no fee-payer address. **PRO+**.
@@ -96,7 +98,7 @@ Annual: PRO €430/yr, ULTRA €1,310/yr, BUSINESS €4,000/yr (2 months free). 
 
 ```toml
 [dependencies]
-madeonsol = "0.27"
+madeonsol = "0.33"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -153,7 +155,7 @@ The `MadeOnSol` client exposes namespaced sub-clients:
 | `client.first_touch_subscriptions` | Push alerts on first-KOL-touch events (ULTRA) |
 | `client.price_alerts` *(new 0.10)* | MC-drop / recovery price alert rules CRUD + event history (PRO/ULTRA) |
 | `client.signals` *(new 0.16)* | **Signal Scorecard** — out-of-sample, machine-readable signal reliability (`performance`) + discovery catalog |
-| `client.sniper` *(new 0.11)* | **Deshred** pre-confirm pump.fun deploy feed (~500ms head start) + custom deployer watchlist (PRO/ULTRA) |
+| `client.sniper` *(new 0.11)* | **Early** pre-confirm pump.fun deploy feed (execution initially unknown) + custom deployer watchlist (ULTRA/BUSINESS/ENTERPRISE) |
 | `client.tools` | Solana tool directory search |
 | `client.stream` | Issue WebSocket streaming tokens (**non-expiring since 2026-08-27**), **rotate** them *(new 0.26.1)*, **list / kill live sessions** |
 | `client.webhooks` | Webhook CRUD (PRO/ULTRA) |
@@ -291,15 +293,15 @@ loop {
 
 **Cost-basis honesty.** Observable only inside the 90-day window. Overflow sells (no matching buy in window) are silently discarded rather than fabricated. `notes.cost_basis_observable_from` makes the cutoff visible.
 
-## Deshred sniper alerts *(new in 0.11)*
+## Early sniper alerts *(new in 0.11)*
 
-The fastest path to a new pump.fun launch. Deploys are reconstructed from shred-level (**deshred**) data and surface **~500ms before the chain confirms them**. **PRO** sees elite + good deployers; **ULTRA** sees every tier and can keep a custom deployer watchlist. For live push use the `sniper:deploy` webhook, the `sniper:deploys` WebSocket channel, or `/alert sniper` in Telegram — these methods are for catch-up, backtesting, and watchlist management.
+Early deploy observations require **ULTRA/BUSINESS/ENTERPRISE**. With ShredPrism activated, stream-token discovery includes `early_ws_url` and `early_stream` for `early:deploys`. Execution starts unknown; use separate execution evidence and deduplicate by `event_id`. No timing lead or settlement rate is guaranteed. REST, legacy sniper WebSocket/webhook delivery and watchlists use the same tier gate.
 
 ```rust
 # async fn run(client: madeonsol::MadeOnSol) -> Result<(), Box<dyn std::error::Error>> {
 use madeonsol::types::{SniperRecentParams, SniperWatchlistAddParams};
 
-// Deshred deploy feed — PRO: elite/good · ULTRA: all tiers
+// Early deploy feed — ULTRA/BUSINESS/ENTERPRISE
 let feed = client.sniper.recent(&SniperRecentParams { limit: Some(50), ..Default::default() }).await?;
 for d in &feed.deploys {
     println!("{} by {} (tier {:?})", d.symbol.as_deref().unwrap_or("?"), d.deployer_wallet, d.deployer_tier);
@@ -846,7 +848,7 @@ assert_eq!(fresh.rotated, Some(true));
 # }
 ```
 
-Channels: `kol:trades`, `kol:coordination`, `kol:first_touches`, `deployer:alerts`, `wallet_tracker:events`, `copytrade:signals`, `price_alert:events`, `sniper:deploys`, `token:graduations` (`GraduationEvent`), `token:prices` (mint-scoped price / MC ticks), `token:locks` *(new 0.26 — event `token:lock`, `TokenLockEvent`: every NEW lock / vesting contract; LP locks not included)*, `token:fee_claims` *(new 0.26 — event `token:fee_claim`, `TokenFeeClaimEvent`: every pump.fun fee event; history starts 2026-08-17)*, `token:surges` *(new 0.27 — events `token:surge` / `token:revival`, `TokenSurgeStreamEvent`: momentum fires with tape / KOL / early-buyer / deployer context and `risk_flags`; server-side filters `kinds`, `tiers`, `launchpads`, `exclude_flags`, `min_mc_usd` / `max_mc_usd`, `deployer_tier` — `SurgeSubscribeFilters`; the +1 h `outcome` is REST-only)*. All PRO+.
+Channels: `kol:trades`, `kol:coordination`, `kol:first_touches`, `deployer:alerts`, `wallet_tracker:events`, `copytrade:signals`, `price_alert:events`, `sniper:deploys`, `token:graduations` (`GraduationEvent`), `token:prices` (mint-scoped price / MC ticks), `token:locks` *(new 0.26 — event `token:lock`, `TokenLockEvent`: every NEW lock / vesting contract; LP locks not included)*, `token:fee_claims` *(new 0.26 — event `token:fee_claim`, `TokenFeeClaimEvent`: every pump.fun fee event; history starts 2026-08-17)*, `token:surges` *(new 0.27 — events `token:surge` / `token:revival`, `TokenSurgeStreamEvent`: momentum fires with tape / KOL / early-buyer / deployer context and `risk_flags`; server-side filters `kinds`, `tiers`, `launchpads`, `exclude_flags`, `min_mc_usd` / `max_mc_usd`, `deployer_tier` — `SurgeSubscribeFilters`; the +1 h `outcome` is REST-only)*. Channel tiers vary; sniper:deploys requires ULTRA/BUSINESS/ENTERPRISE.
 
 The DEX firehose URL (`token.dex_ws_url`) is only present for ULTRA subscribers.
 See <https://madeonsol.com/api-docs> for the full subscribe/unsubscribe protocol.
