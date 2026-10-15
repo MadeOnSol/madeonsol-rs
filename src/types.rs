@@ -1698,6 +1698,12 @@ pub struct DeployerTokensParams {
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub offset: Option<u32>,
+    /// `true` = only tokens that graduated; `total` / `has_more` then count the bonded set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub only_bonded: Option<bool>,
+    /// v0.34 — opt in (TR-03) to `launches_24h` on the response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_launches_24h: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -2060,6 +2066,10 @@ pub struct DeployerTokensResponse {
     /// Present on the not-a-deployer empty page.
     #[serde(default)]
     pub wallet: Option<String>,
+    /// v0.34 — present only with `include_launches_24h = true`. `count` is
+    /// `None` (never 0) unless `status == "observed"`.
+    #[serde(default)]
+    pub launches_24h: Option<DeployerLaunches24h>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2717,6 +2727,21 @@ pub struct AlphaCapTableBuyer {
     /// No sell observed from this buyer yet.
     #[serde(default)]
     pub still_holding: Option<bool>,
+    /// v0.34 — only with `verify_current_balances = true` (ULTRA+).
+    #[serde(default)]
+    pub balance_now: Option<BalanceNow>,
+    /// v0.34 — only with `verify_current_balances = true`:
+    /// `verified_nonzero` | `verified_zero` (the balance, unlike `still_holding`).
+    #[serde(default)]
+    pub holding_status: Option<String>,
+    /// v0.34 — only with `verify_current_balances = true`: zero balance
+    /// although no sell is on the swap ledger.
+    #[serde(default)]
+    pub exited_without_sell: Option<bool>,
+    /// v0.34 — only with `include_scout_scores = true`; KOL buyers only, as
+    /// of their own `first_buy_at` (no hindsight).
+    #[serde(default)]
+    pub scout_score: Option<CapTableScoutScore>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2738,6 +2763,16 @@ pub struct AlphaCapTableResponse {
     /// v0.23.4 — trade-coverage disclosure (`None` on older cached responses).
     #[serde(default)]
     pub coverage: Option<TokenTradesCoverage>,
+    /// v0.34 — only with `include_scout_scores = true`: `ok` | `unavailable` | `timeout` | `error`.
+    #[serde(default)]
+    pub scout_scores_status: Option<String>,
+    /// v0.34 — only with `include_scout_scores = true`: the scout score method.
+    #[serde(default)]
+    pub scout_scores_note: Option<String>,
+    /// v0.34 — only with `verify_current_balances = true`, after EVERY
+    /// scored buyer was read.
+    #[serde(default)]
+    pub onchain_balance_verification: Option<CapTableBalanceVerification>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2794,6 +2829,10 @@ pub struct AlphaBuyerQualityResponse {
     /// Present only when `breakdown.dump_cluster_count >= 1` and a signal-performance bucket exists.
     #[serde(default)]
     pub signal_stats: Option<BuyerQualitySignalStats>,
+    /// v0.34 — only with `include_balances = true` (PRO+): what the
+    /// dump-cluster early buyers hold NOW, from balances.
+    #[serde(default)]
+    pub dump_cluster_held_now: Option<DumpClusterHeldNow>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -3282,6 +3321,10 @@ pub struct BundleWallet {
     pub bot_confidence: Option<String>,
     /// Tokens still held by this wallet.
     pub tokens_held: f64,
+    /// v0.34 — only with `include_balances = true`: this wallet's CURRENT
+    /// balance of the mint. `None` when the cohort read failed.
+    #[serde(default)]
+    pub balance_now: Option<BalanceNow>,
 }
 
 /// Bundle intelligence for a token (PRO/ULTRA): detects wallets that bought in
@@ -3296,6 +3339,10 @@ pub struct TokenBundle {
     /// Per-wallet breakdown of the cohort. Empty on lower tiers.
     #[serde(default)]
     pub wallets: Vec<BundleWallet>,
+    /// v0.34 — only with `include_balances = true` (PRO+): the cohort's
+    /// CURRENT balances, next to the swap-derived `bundle.*` figures.
+    #[serde(default)]
+    pub held_now: Option<HeldNow>,
     /// v0.23.4 — trade-coverage disclosure (`None` on older cached responses).
     #[serde(default)]
     pub coverage: Option<TokenTradesCoverage>,
@@ -3371,6 +3418,14 @@ pub enum HolderLabel {
     Bundle,
     Bot,
     DumpCluster,
+    /// v0.34 — only with `include_wallet_flags = true`.
+    Sniper,
+    /// v0.34 — only with `include_wallet_flags = true`.
+    BundlerWallet,
+    /// v0.34 — only with `include_wallet_flags = true`.
+    Dumper,
+    /// v0.34 — only with `include_wallet_flags = true`.
+    AlphaTracked,
     #[serde(other)]
     Other,
 }
@@ -3441,6 +3496,10 @@ pub struct TokenHolder {
     pub bot_confidence: Option<String>,
     #[serde(default)]
     pub historical_win_rate: Option<f64>,
+    /// v0.34 — only with `include_wallet_flags = true`; `None` when the flag
+    /// sources were unavailable.
+    #[serde(default)]
+    pub wallet_flags: Option<HolderWalletFlags>,
 }
 
 /// An owner excluded from the circulating denominator (pool / bonding curve /
@@ -3585,6 +3644,9 @@ pub struct TokenHoldersResponse {
     #[serde(default)]
     pub deployer: Option<TokenHoldersDeployer>,
     pub source: TokenHoldersSource,
+    /// v0.34 — only with `include_wallet_flags = true`.
+    #[serde(default)]
+    pub wallet_flags_meta: Option<WalletFlagsMeta>,
 }
 
 // ─── Token locks & vesting (/tokens/{mint}/locks, /tokens/locks, /tokens/unlocks) — v0.26 ───
@@ -5646,6 +5708,10 @@ pub struct DepthUnsupportedPool {
     pub liquidity_usd: Option<f64>,
     /// `true` when the pool saw a swap within the last hour.
     pub is_active: bool,
+    /// v0.34 — with reason `dlmm_insufficient_liquidity_in_loaded_bins`: the
+    /// largest SOL input (incl. fees) the loaded bins can absorb (0 = none).
+    #[serde(default)]
+    pub fillable_up_to_sol: Option<f64>,
     /// Why depth isn't available for this pool.
     pub reason: String,
 }
@@ -5999,6 +6065,10 @@ pub struct SniperDeploy {
     pub deployer_labeled_tokens: Option<i64>,
     pub confirmed_on_chain: Option<bool>,
     pub confirmed_at: Option<String>,
+    /// v0.34 — ShredPrism: when a successful finalized outcome of this action
+    /// was first observed (observation time). Always `None` for legacy deshred rows.
+    #[serde(default)]
+    pub finalized_at: Option<String>,
     /// v0.22 — slot-window snipe rollup. `None` for deploys younger than the
     /// rollup's ~10-min settle window or outside the trade-pipeline write-gate
     /// (absent, not zero).
@@ -8055,11 +8125,23 @@ pub struct TopTrader {
     pub bought_sol: f64,
     pub sold_sol: f64,
     pub realized_pnl_sol: f64,
-    pub unrealized_pnl_sol: f64,
-    pub total_pnl_sol: f64,
-    pub held_value_sol: f64,
+    /// v0.34 — `None` when still holding and the token has no price (FIFO).
+    #[serde(default)]
+    pub unrealized_pnl_sol: Option<f64>,
+    #[serde(default)]
+    pub total_pnl_sol: Option<f64>,
+    #[serde(default)]
+    pub held_value_sol: Option<f64>,
     #[serde(default)]
     pub roi: Option<f64>,
+    /// v0.34 — FIFO only: tokens sold without an observed earlier buy
+    /// (excluded from realized PnL). `None` under `average_cost`.
+    #[serde(default)]
+    pub unmatched_sell_tokens: Option<f64>,
+    /// v0.34 — FIFO only: `true` when every sold token matched an observed
+    /// buy. `None` under `average_cost`.
+    #[serde(default)]
+    pub cost_basis_complete: Option<bool>,
     #[serde(default)]
     pub still_holding: Option<bool>,
     pub first_trade_at: String,
@@ -8094,6 +8176,12 @@ pub struct TopTradersResponse {
     pub mint: String,
     pub sort: String,
     pub window_days: u32,
+    /// v0.34 — `fifo` (same cost basis as `/wallet/{address}/pnl`) or
+    /// `average_cost` (legacy fallback).
+    #[serde(default)]
+    pub cost_method: Option<String>,
+    #[serde(default)]
+    pub cost_method_note: Option<String>,
     pub traders: Vec<TopTrader>,
     pub summary: TopTradersSummary,
     #[serde(default)]
@@ -8513,6 +8601,22 @@ pub struct DeployerActivityEvent {
     pub sample_tx_ids: Option<Vec<String>>,
     #[serde(default)]
     pub first_tx: Option<String>,
+    /// v0.34 — realtime dev-event actor: the developer, or (ULTRA+ identity
+    /// projection) a proven linked wallet.
+    #[serde(default)]
+    pub actor_wallet: Option<String>,
+    /// v0.34 — `deployer` | `linked_wallet`.
+    #[serde(default)]
+    pub actor_role: Option<String>,
+    /// v0.34 — exact base-unit amount (u64 as a decimal string) for realtime dev events.
+    #[serde(default)]
+    pub token_amount_raw: Option<String>,
+    #[serde(default)]
+    pub venue: Option<String>,
+    /// v0.34 — class of the raw transfer counterparty (the raw `counterparty`
+    /// address itself stays in `extra`; never an identity claim).
+    #[serde(default)]
+    pub counterparty_class: Option<String>,
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
 }
@@ -8761,4 +8865,477 @@ pub struct WalletPositionHolding {
     pub cost_basis_not_held_sol: f64,
     pub verified_at: String,
     pub source: String,
+}
+
+// ─── v0.34: terminal gap fields (2026-10-15) ────────────────────────────────
+
+/// `launches_24h` on [`DeployerTokensResponse`] (opt-in `include_launches_24h`):
+/// distinct launches observed in OUR index over a UTC rolling 24 h window.
+/// Indexed observations only, not a chain-complete count.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeployerLaunches24h {
+    #[serde(default)]
+    pub window_start: Option<String>,
+    #[serde(default)]
+    pub window_end: Option<String>,
+    /// `None` (never 0) unless `status == "observed"`.
+    #[serde(default)]
+    pub count: Option<u64>,
+    /// `observed` | `source_unavailable` | `over_budget` | `source_incomplete` | `untracked_deployer`.
+    pub status: String,
+    /// `indexed_observations_only`.
+    #[serde(default)]
+    pub completeness: Option<String>,
+    #[serde(default)]
+    pub provenance: Option<String>,
+    #[serde(default)]
+    pub row_cap_per_source: Option<u64>,
+    /// Per-source row counts (`bonded`, `pending`).
+    #[serde(default)]
+    pub source_rows: Option<HashMap<String, u64>>,
+}
+
+/// One wallet's CURRENT balance of a mint, read from chain (every token
+/// account of the owner for the mint, either token program). `amount_raw` is
+/// a raw u64 **string**; `amount` is the UI-scaled decimal string.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BalanceNow {
+    pub amount_raw: String,
+    #[serde(default)]
+    pub decimals: Option<i64>,
+    #[serde(default)]
+    pub amount: Option<String>,
+    pub holding: bool,
+    #[serde(default)]
+    pub token_accounts: Option<u32>,
+    #[serde(default)]
+    pub slot: Option<i64>,
+}
+
+/// Balance-based `held_now` block of a wallet cohort (bundle, bundle clusters,
+/// bundle share, dump cluster). Totals are only set when every wallet was read
+/// (`complete`); never a partial sum.
+#[derive(Debug, Clone, Deserialize)]
+pub struct HeldNow {
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub checked_at: Option<String>,
+    #[serde(default)]
+    pub wallets: Option<u32>,
+    #[serde(default)]
+    pub verified_wallets: Option<u32>,
+    #[serde(default)]
+    pub holding_wallets: Option<u32>,
+    #[serde(default)]
+    pub complete: Option<bool>,
+    #[serde(default)]
+    pub incomplete_reason: Option<String>,
+    #[serde(default)]
+    pub slot_min: Option<i64>,
+    #[serde(default)]
+    pub slot_max: Option<i64>,
+    /// Raw u64 sum as a decimal string.
+    #[serde(default)]
+    pub tokens_held_raw: Option<String>,
+    /// UI-scaled decimal string.
+    #[serde(default)]
+    pub tokens_held: Option<String>,
+    /// RATIO in [0, 1] of circulating supply.
+    #[serde(default)]
+    pub held_pct_of_supply: Option<f64>,
+    /// `circulating_supply_raw` or `None`.
+    #[serde(default)]
+    pub supply_basis: Option<String>,
+}
+
+/// Query for [`Token::bundle_with`](crate::api::token::Token::bundle_with).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TokenBundleParams {
+    /// PRO+: add `held_now` + per-wallet `balance_now` (current balances).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_balances: Option<bool>,
+}
+
+/// Query for [`Alpha::buyer_quality_with`](crate::api::alpha::Alpha::buyer_quality_with).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct BuyerQualityParams {
+    /// PRO+: add `dump_cluster_held_now`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_balances: Option<bool>,
+}
+
+/// One dump-cluster member with its current balance.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DumpClusterWallet {
+    pub wallet: String,
+    #[serde(default)]
+    pub balance_now: Option<BalanceNow>,
+}
+
+/// `dump_cluster_held_now` on [`AlphaBuyerQualityResponse`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct DumpClusterHeldNow {
+    #[serde(default)]
+    pub cohort_size: Option<u32>,
+    /// Dump-cluster members among the early buyers (= `dump_cluster_count`).
+    #[serde(default)]
+    pub members: Option<u32>,
+    #[serde(default)]
+    pub held_now: Option<HeldNow>,
+    #[serde(default)]
+    pub wallets: Vec<DumpClusterWallet>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// Query for [`Alpha::cap_table_with`](crate::api::alpha::Alpha::cap_table_with).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CapTableParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// ULTRA+: read every scored buyer's CURRENT balance (all verified or 503).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verify_current_balances: Option<bool>,
+    /// Add `scout_score` per KOL buyer (as of its own first buy).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_scout_scores: Option<bool>,
+}
+
+/// Per-buyer `scout_score` on the cap table.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CapTableScoutScore {
+    #[serde(default)]
+    pub as_of: Option<String>,
+    #[serde(default)]
+    pub first_touches_30d: Option<u32>,
+    #[serde(default)]
+    pub avg_followers_4h: Option<f64>,
+    #[serde(default)]
+    pub swarm_3plus_pct: Option<f64>,
+    #[serde(default)]
+    pub swarm_5plus_pct: Option<f64>,
+    /// `S` | `A` | `B` | `C`.
+    #[serde(default)]
+    pub scout_tier: Option<String>,
+}
+
+/// `onchain_balance_verification` on [`AlphaCapTableResponse`]. Reads are not
+/// pinned to one slot (`slot_min` / `slot_max`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct CapTableBalanceVerification {
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub checked_at: Option<String>,
+    #[serde(default)]
+    pub slot_min: Option<i64>,
+    #[serde(default)]
+    pub slot_max: Option<i64>,
+    #[serde(default)]
+    pub verified_wallets: Option<u32>,
+    #[serde(default)]
+    pub complete: Option<bool>,
+    #[serde(default)]
+    pub verified_still_holding: Option<u32>,
+    #[serde(default)]
+    pub verified_exited: Option<u32>,
+    #[serde(default)]
+    pub exited_without_sell: Option<u32>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// Query for [`Token::holders_with`](crate::api::token::Token::holders_with).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TokenHoldersParams {
+    /// Opt in (TR-07) to per-holder `wallet_flags` + top-level `wallet_flags_meta`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_wallet_flags: Option<bool>,
+}
+
+/// Per-label evaluation state: `evaluated = false` means insufficient
+/// evidence, NOT a verified negative.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletFlagLabelCoverage {
+    pub evaluated: bool,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// Per-holder `wallet_flags` (opt-in `include_wallet_flags`). A `false` with
+/// `label_coverage[label].evaluated == false` is not a verified negative.
+#[derive(Debug, Clone, Deserialize)]
+pub struct HolderWalletFlags {
+    #[serde(default)]
+    pub is_sniper: Option<bool>,
+    #[serde(default)]
+    pub is_bundler: Option<bool>,
+    #[serde(default)]
+    pub is_dumper: Option<bool>,
+    #[serde(default)]
+    pub is_kol: Option<bool>,
+    #[serde(default)]
+    pub is_alpha_tracked: Option<bool>,
+    #[serde(default)]
+    pub is_bot_high_confidence: Option<bool>,
+    #[serde(default)]
+    pub label_coverage: Option<HashMap<String, WalletFlagLabelCoverage>>,
+}
+
+/// Top-level `wallet_flags_meta` (opt-in `include_wallet_flags`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct WalletFlagsMeta {
+    /// `available` | `partial` | `unavailable`.
+    pub status: String,
+    #[serde(default)]
+    pub rule_version: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
+/// Query for [`Kol::token_trades`](crate::api::kol::Kol::token_trades).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct KolTokenTradesParams {
+    /// 1–200 (default 100); BASIC is clamped to 20.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// `buy` | `sell`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    /// ISO 8601; only trades strictly after this time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    /// `next_cursor` from the previous page.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    /// Only this KOL wallet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kol: Option<String>,
+}
+
+/// One stored KOL trade on a token.
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolTokenTrade {
+    pub id: String,
+    #[serde(default)]
+    pub kol_name: Option<String>,
+    #[serde(default)]
+    pub kol_twitter: Option<String>,
+    pub wallet: String,
+    /// `buy` | `sell`.
+    pub action: String,
+    #[serde(default)]
+    pub sol_amount: Option<f64>,
+    #[serde(default)]
+    pub token_amount: Option<f64>,
+    #[serde(default)]
+    pub price_usd_at_trade: Option<f64>,
+    #[serde(default)]
+    pub market_cap_usd_at_trade: Option<f64>,
+    #[serde(default)]
+    pub tx_signature: Option<String>,
+    pub traded_at: String,
+}
+
+/// `GET /kol/tokens/{mint}/trades` — every stored KOL trade on one token,
+/// newest first, keyset paged.
+#[derive(Debug, Clone, Deserialize)]
+pub struct KolTokenTradesResponse {
+    pub token_mint: String,
+    #[serde(default)]
+    pub trades: Vec<KolTokenTrade>,
+    pub count: u32,
+    /// Distinct KOL addresses on this page.
+    #[serde(default)]
+    pub kols_on_page: Option<u32>,
+    #[serde(default)]
+    pub next_cursor: Option<String>,
+    /// Exact (limit + 1 probe).
+    pub has_more: bool,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// Query for [`Token::bundle_share`](crate::api::token::Token::bundle_share).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TokenBundleShareParams {
+    /// `1h` | `6h` | `24h` (default): which later clusters to include.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window: Option<String>,
+    /// 3–20 (default 3).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_wallets: Option<u32>,
+}
+
+/// Wallet counts behind [`TokenBundleShareResponse`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct BundleShareWallets {
+    #[serde(default)]
+    pub total: Option<u32>,
+    #[serde(default)]
+    pub launch_cohort_wallets: Option<u32>,
+    #[serde(default)]
+    pub cluster_wallets: Option<u32>,
+    #[serde(default)]
+    pub overlap: Option<u32>,
+    #[serde(default)]
+    pub clusters_counted: Option<u32>,
+    #[serde(default)]
+    pub verified: Option<u32>,
+    #[serde(default)]
+    pub holding: Option<u32>,
+    #[serde(default)]
+    pub max: Option<u32>,
+}
+
+/// `GET /tokens/{mint}/bundle-share` (PRO+) — ONE figure: share of supply
+/// held now by every bundle wallet (launch cohort ∪ clusters), cached 30 s.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenBundleShareResponse {
+    pub mint: String,
+    #[serde(default)]
+    pub window: Option<String>,
+    #[serde(default)]
+    pub min_wallets: Option<u32>,
+    /// RATIO in [0, 1]. `None` unless every wallet was read (see
+    /// `held_now.incomplete_reason`); never a partial sum.
+    #[serde(default)]
+    pub bundled_pct_of_supply_now: Option<f64>,
+    /// `launch_and_clusters` | `launch_cohort_only`.
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// `ok` | `unavailable` | `timeout` | `error`.
+    #[serde(default)]
+    pub clusters_status: Option<String>,
+    #[serde(default)]
+    pub wallets: Option<BundleShareWallets>,
+    #[serde(default)]
+    pub held_now: Option<HeldNow>,
+    #[serde(default)]
+    pub as_of: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// Query for [`Token::bundles`](crate::api::token::Token::bundles).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TokenBundlesParams {
+    /// `1h` | `6h` | `24h` (default).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window: Option<String>,
+    /// 3–20 (default 3): minimum distinct buyers in one slot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_wallets: Option<u32>,
+    /// 1–100 (default 50).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// Add `held_now` to the 3 most recent clusters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_balances: Option<bool>,
+}
+
+/// `summary` on [`TokenBundlesResponse`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct BundleClustersSummary {
+    #[serde(default)]
+    pub cluster_count: Option<u32>,
+    #[serde(default)]
+    pub launch_clusters: Option<u32>,
+    #[serde(default)]
+    pub later_clusters: Option<u32>,
+    #[serde(default)]
+    pub latest_cluster_at: Option<String>,
+    #[serde(default)]
+    pub largest_cluster_wallets: Option<u32>,
+    /// Window baseline (active units, buys, buys per active unit); `None` when
+    /// no cluster was found.
+    #[serde(default)]
+    pub baseline: Option<serde_json::Value>,
+}
+
+/// What a cluster's wallets have SOLD of the token since the cluster.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BundleClusterExit {
+    pub cluster_id: i64,
+    #[serde(default)]
+    pub followed_until: Option<String>,
+    #[serde(default)]
+    pub wallets_tracked: Option<u32>,
+    #[serde(default)]
+    pub wallets_sold: Option<u32>,
+    /// Sold >= 99 % of their cluster buy.
+    #[serde(default)]
+    pub wallets_exited: Option<u32>,
+    #[serde(default)]
+    pub bought_tokens: Option<f64>,
+    #[serde(default)]
+    pub sold_tokens: Option<f64>,
+    /// 0..1.
+    #[serde(default)]
+    pub sold_pct: Option<f64>,
+    #[serde(default)]
+    pub realized_sol: Option<f64>,
+    #[serde(default)]
+    pub last_sell_at: Option<String>,
+}
+
+/// One coordinated buy cluster (≥ `min_wallets` distinct buyers in one slot).
+/// Evidence, not a verdict.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BundleCluster {
+    pub slot: i64,
+    #[serde(default)]
+    pub atomic_txs: u32,
+    #[serde(default)]
+    pub sol_volume: Option<f64>,
+    #[serde(default)]
+    pub token_volume: Option<f64>,
+    pub at: String,
+    #[serde(default)]
+    pub minutes_after_launch: Option<f64>,
+    /// `launch` | `later` | `unknown`.
+    pub phase: String,
+    pub wallet_count: u32,
+    /// Buyers with no earlier buy of this token.
+    #[serde(default)]
+    pub new_wallets: u32,
+    /// At most 50.
+    #[serde(default)]
+    pub wallets: Vec<String>,
+    /// Only with `include_balances = true`, on the 3 most recent clusters.
+    #[serde(default)]
+    pub held_now: Option<HeldNow>,
+    /// `None` = not followed by the exit ledger.
+    #[serde(default)]
+    pub exit: Option<BundleClusterExit>,
+}
+
+/// `GET /tokens/{mint}/bundles` (PRO+) — every coordinated buy cluster in the
+/// window, launch AND later.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenBundlesResponse {
+    pub mint: String,
+    #[serde(default)]
+    pub window: Option<String>,
+    #[serde(default)]
+    pub min_wallets: Option<u32>,
+    #[serde(default)]
+    pub launch_at: Option<String>,
+    #[serde(default)]
+    pub summary: Option<BundleClustersSummary>,
+    #[serde(default)]
+    pub clusters: Vec<BundleCluster>,
+    /// Only with `include_balances = true`.
+    #[serde(default)]
+    pub held_now_clusters: Option<u32>,
+    /// `ok` | `unavailable` | `error`.
+    #[serde(default)]
+    pub exit_tracking: Option<String>,
+    #[serde(default)]
+    pub exit_note: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
 }

@@ -87,6 +87,20 @@ impl Kol {
         self.core.get("/kol/tokens/trending", params).await
     }
 
+    /// v0.34 — Every stored KOL trade on one token, newest first
+    /// (`GET /kol/tokens/{mint}/trades`), keyset paged with `next_cursor` /
+    /// exact `has_more`. BASIC: 5-minute delayed tape, 20 rows per page. KOL
+    /// trades below the persistence floor are not stored.
+    pub async fn token_trades(
+        &self,
+        mint: &str,
+        params: &KolTokenTradesParams,
+    ) -> Result<KolTokenTradesResponse> {
+        self.core
+            .get(&format!("/kol/tokens/{}/trades", mint), params)
+            .await
+    }
+
     /// Ranked list of KOL buyers for a token, ordered by first-buy timestamp.
     pub async fn token_entry_order(
         &self,

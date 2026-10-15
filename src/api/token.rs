@@ -122,6 +122,46 @@ impl Token {
             .await
     }
 
+    /// v0.34 — [`bundle`](Self::bundle) with query options.
+    /// `include_balances = true` (PRO+) adds `held_now` (the cohort's CURRENT
+    /// balances; totals only for a complete read) and per-wallet `balance_now`.
+    pub async fn bundle_with(&self, mint: &str, params: &TokenBundleParams) -> Result<TokenBundle> {
+        self.core
+            .get(&format!("/tokens/{}/bundle", mint), params)
+            .await
+    }
+
+    /// v0.34 — ONE figure for a terminal (`GET /tokens/{mint}/bundle-share`,
+    /// PRO+): `bundled_pct_of_supply_now`, the share of circulating supply held
+    /// RIGHT NOW by every bundle wallet (launch cohort ∪ coordinated buy
+    /// clusters in the window), read from chain balances. `None` unless every
+    /// wallet was read — never a partial sum. Cached 30 s per token (`as_of`).
+    pub async fn bundle_share(
+        &self,
+        mint: &str,
+        params: &TokenBundleShareParams,
+    ) -> Result<TokenBundleShareResponse> {
+        self.core
+            .get(&format!("/tokens/{}/bundle-share", mint), params)
+            .await
+    }
+
+    /// v0.34 — Every coordinated buy cluster on a token in a window, launch
+    /// AND later (`GET /tokens/{mint}/bundles`, PRO+). `summary.baseline` gives
+    /// the window's buys per active slot: a cluster is evidence, not a verdict.
+    /// Only STORED buys count (persistence floor). `include_balances = true`
+    /// adds `held_now` to the 3 most recent clusters; `exit` carries the
+    /// cluster's sell ledger when bundle-watch followed it.
+    pub async fn bundles(
+        &self,
+        mint: &str,
+        params: &TokenBundlesParams,
+    ) -> Result<TokenBundlesResponse> {
+        self.core
+            .get(&format!("/tokens/{}/bundles", mint), params)
+            .await
+    }
+
     /// v0.20 — All liquidity pools for a token across every tracked DEX, plus an
     /// aggregate [`PoolsSummary`] (`pool_count`, `active_pool_count`, `dex_count`,
     /// `dexes`, `total_liquidity_usd`, `primary_pool`, `primary_dex`,
@@ -172,6 +212,20 @@ impl Token {
     pub async fn holders(&self, mint: &str) -> Result<TokenHoldersResponse> {
         self.core
             .get(&format!("/tokens/{}/holders", mint), &())
+            .await
+    }
+
+    /// v0.34 — [`holders`](Self::holders) with query options.
+    /// `include_wallet_flags = true` (TR-07) adds per-holder `wallet_flags`
+    /// and top-level `wallet_flags_meta`; a `false` whose
+    /// `label_coverage[label].evaluated` is `false` is NOT a verified negative.
+    pub async fn holders_with(
+        &self,
+        mint: &str,
+        params: &TokenHoldersParams,
+    ) -> Result<TokenHoldersResponse> {
+        self.core
+            .get(&format!("/tokens/{}/holders", mint), params)
             .await
     }
 
