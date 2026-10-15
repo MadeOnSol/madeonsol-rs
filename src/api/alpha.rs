@@ -43,10 +43,39 @@ impl Alpha {
             .await
     }
 
+    /// v0.34 — [`cap_table`](Self::cap_table) with query options:
+    /// `verify_current_balances` (ULTRA+: per-buyer `balance_now`,
+    /// `holding_status`, `exited_without_sell` + `onchain_balance_verification`;
+    /// all verified or 503) and `include_scout_scores` (per-buyer
+    /// `scout_score` as of its own first buy + `scout_scores_status` /
+    /// `scout_scores_note`).
+    pub async fn cap_table_with(
+        &self,
+        mint: &str,
+        params: &CapTableParams,
+    ) -> Result<AlphaCapTableResponse> {
+        self.core
+            .get(&format!("/tokens/{}/cap-table", mint), params)
+            .await
+    }
+
     /// 0–100 buyer quality score for a token's early-buyer cohort. 5-min cache.
     pub async fn buyer_quality(&self, mint: &str) -> Result<AlphaBuyerQualityResponse> {
         self.core
             .get(&format!("/tokens/{}/buyer-quality", mint), &())
+            .await
+    }
+
+    /// v0.34 — [`buyer_quality`](Self::buyer_quality) with query options.
+    /// `include_balances = true` (PRO+) adds `dump_cluster_held_now`: what the
+    /// dump-cluster early buyers hold NOW, from balances.
+    pub async fn buyer_quality_with(
+        &self,
+        mint: &str,
+        params: &BuyerQualityParams,
+    ) -> Result<AlphaBuyerQualityResponse> {
+        self.core
+            .get(&format!("/tokens/{}/buyer-quality", mint), params)
             .await
     }
 }
